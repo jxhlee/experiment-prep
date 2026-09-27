@@ -3,8 +3,6 @@
 import { useState } from "react";
 
 const SERVICE_NAME = "실험 프렙 (가제)";
-const PRESET_SCALES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const SIG_FIGS = [1, 2, 3, 4, 5, 6];
 
 let nextRowId = 3;
 
@@ -53,7 +51,17 @@ function StepIndicator({ step, onJump }) {
   );
 }
 
-function StepOneInput({ methodText, setMethodText, scale, setScale, customScale, setCustomScale, onAnalyze }) {
+function StepOneInput({
+  methodText,
+  setMethodText,
+  scale,
+  setScale,
+  customScale,
+  setCustomScale,
+  onAnalyze,
+  isAnalyzing,
+  analyzeError,
+}) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4">
       <h1 className="text-center text-2xl font-bold text-slate-800">{SERVICE_NAME}</h1>
@@ -71,28 +79,28 @@ function StepOneInput({ methodText, setMethodText, scale, setScale, customScale,
         />
       </div>
 
+      {analyzeError && (
+        <p className="mt-3 rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{analyzeError}</p>
+      )}
+
       <div className="mt-4 flex flex-col gap-4 sm:flex-row">
         <div className="flex-1 rounded-lg bg-slate-800 p-4">
           <p className="mb-3 text-center text-sm text-white">
-            실험 규모 – 숫자 선택 (1~10 선택지 + 직접 입력 칸 1개)
+            실험 규모: ×{customScale || scale || 1}
           </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            {PRESET_SCALES.map((n) => (
-              <button
-                key={n}
-                onClick={() => {
-                  setScale(n);
-                  setCustomScale("");
-                }}
-                className={`h-9 w-9 rounded-md text-sm font-medium transition-colors ${
-                  scale === n
-                    ? "bg-white text-slate-800"
-                    : "bg-slate-700 text-white hover:bg-slate-600"
-                }`}
-              >
-                {n}
-              </button>
-            ))}
+          <input
+            type="range"
+            min="0.5"
+            max="10"
+            step="0.5"
+            value={customScale ? Number(customScale) : scale ?? 1}
+            onChange={(e) => {
+              setScale(Number(e.target.value));
+              setCustomScale("");
+            }}
+            className="w-full accent-white"
+          />
+          <div className="mt-3 flex justify-center">
             <input
               type="number"
               min="0"
@@ -103,17 +111,17 @@ function StepOneInput({ methodText, setMethodText, scale, setScale, customScale,
                 setScale(null);
               }}
               placeholder="직접 입력"
-              className="h-9 w-24 rounded-md bg-slate-700 px-2 text-sm text-white placeholder-slate-300 outline-none focus:bg-slate-600"
+              className="h-9 w-32 rounded-md bg-slate-700 px-2 text-sm text-white placeholder-slate-300 outline-none focus:bg-slate-600"
             />
           </div>
         </div>
 
         <button
           onClick={onAnalyze}
-          disabled={!methodText.trim()}
+          disabled={!methodText.trim() || isAnalyzing}
           className="rounded-lg bg-slate-800 px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          분석하기
+          {isAnalyzing ? "분석 중..." : "분석하기"}
         </button>
       </div>
     </div>
@@ -161,7 +169,7 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
                       <input
                         value={row.name}
                         onChange={(e) => updateRow(row.id, "name", e.target.value)}
-                        className="w-full rounded px-2 py-1 outline-none focus:bg-orange-50"
+                        className="w-full rounded px-2 py-1 text-slate-900 outline-none focus:bg-orange-50"
                         placeholder="예: NaCl"
                       />
                     </td>
@@ -169,7 +177,7 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
                       <input
                         value={row.concentration}
                         onChange={(e) => updateRow(row.id, "concentration", e.target.value)}
-                        className="w-full rounded px-2 py-1 outline-none focus:bg-orange-50"
+                        className="w-full rounded px-2 py-1 text-slate-900 outline-none focus:bg-orange-50"
                         placeholder="예: 0.9 %"
                       />
                     </td>
@@ -177,7 +185,7 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
                       <input
                         value={row.volume}
                         onChange={(e) => updateRow(row.id, "volume", e.target.value)}
-                        className="w-full rounded px-2 py-1 outline-none focus:bg-orange-50"
+                        className="w-full rounded px-2 py-1 text-slate-900 outline-none focus:bg-orange-50"
                         placeholder="예: 500 mL"
                       />
                     </td>
@@ -198,21 +206,21 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
 
         <div className="flex w-full flex-col gap-3 md:w-56">
           <div className="rounded-lg bg-slate-800 p-3">
-            <p className="mb-2 text-center text-xs text-white">유효숫자 설정 (버튼식)</p>
-            <div className="flex flex-wrap justify-center gap-1">
-              {SIG_FIGS.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setSigFigs(n)}
-                  className={`h-7 w-7 rounded text-xs font-medium ${
-                    sigFigs === n
-                      ? "bg-white text-slate-800"
-                      : "bg-slate-700 text-white hover:bg-slate-600"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
+            <p className="mb-2 text-center text-xs text-white">유효숫자 설정 (좌우 버튼 형식)</p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setSigFigs((v) => Math.max(1, v - 1))}
+                className="h-8 w-8 rounded bg-slate-700 text-white hover:bg-slate-600"
+              >
+                −
+              </button>
+              <span className="w-6 text-center text-white">{sigFigs}</span>
+              <button
+                onClick={() => setSigFigs((v) => Math.min(6, v + 1))}
+                className="h-8 w-8 rounded bg-slate-700 text-white hover:bg-slate-600"
+              >
+                +
+              </button>
             </div>
           </div>
 
@@ -242,7 +250,13 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
   );
 }
 
-function StepThreeResult({ reagents, sigFigs, setSigFigs, scaleFactor, setScaleFactor, onBack }) {
+function StepThreeResult({ reagents, timeline, sigFigs, setSigFigs, scaleFactor, setScaleFactor, onBack }) {
+  const [timelineMode, setTimelineMode] = useState("scroll");
+  const [timelineIndex, setTimelineIndex] = useState(0);
+
+  const goPrev = () => setTimelineIndex((i) => Math.max(0, i - 1));
+  const goNext = () => setTimelineIndex((i) => Math.min(timeline.length - 1, i + 1));
+
   return (
     <div className="mx-auto w-full max-w-4xl px-4">
       <h1 className="text-2xl font-bold text-slate-800">{SERVICE_NAME}</h1>
@@ -263,7 +277,7 @@ function StepThreeResult({ reagents, sigFigs, setSigFigs, scaleFactor, setScaleF
               <tbody>
                 {reagents.map((r) => (
                   <tr key={r.id} className="border-t border-orange-100">
-                    <td className="px-3 py-2">{r.name || "(이름 없음)"}</td>
+                    <td className="px-3 py-2 text-slate-900">{r.name || "(이름 없음)"}</td>
                     <td className="px-3 py-2 text-slate-400">— (계산 결과 예정)</td>
                   </tr>
                 ))}
@@ -272,29 +286,96 @@ function StepThreeResult({ reagents, sigFigs, setSigFigs, scaleFactor, setScaleF
           </div>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <div className="rounded-lg bg-orange-600 p-4">
-            <p className="mb-3 text-sm text-white">실험 타임라인 (좌우 스크롤 가능하게)</p>
-            <div className="flex gap-3 overflow-x-auto rounded-md bg-white p-3">
-              {DUMMY_TIMELINE.map((step, i) => (
-                <div
-                  key={i}
-                  className="flex min-w-[110px] flex-col items-center rounded-md border border-orange-200 p-3 text-center"
-                >
-                  <span className="text-sm font-medium text-slate-700">{step.label}</span>
-                  <span className="mt-1 text-xs text-slate-400">{step.duration}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+        <div className="rounded-lg bg-orange-600 p-4">
+          <p className="text-sm leading-relaxed text-white">
+            실험 타임라인에 대한 설명 (각각의 항목에 대해서 줄글로) — 추후 각 단계별 상세 설명이
+            여기에 표시됩니다.
+          </p>
+        </div>
+      </div>
 
-          <div className="rounded-lg bg-orange-600 p-4">
-            <p className="text-sm text-white">
-              실험 타임라인에 대한 설명 (각각의 항목에 대해서 줄글로) — 추후 각 단계별 상세 설명이
-              여기에 표시됩니다.
-            </p>
+      <div className="mt-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 p-5 shadow-lg ring-2 ring-indigo-300">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-2 text-base font-bold text-white">
+            <span aria-hidden>⏱</span> 실험 타임라인
+          </p>
+          <div className="flex overflow-hidden rounded-md border border-white/40 text-xs font-medium">
+            <button
+              onClick={() => setTimelineMode("scroll")}
+              className={`px-3 py-1.5 transition-colors ${
+                timelineMode === "scroll"
+                  ? "bg-white text-indigo-700"
+                  : "bg-transparent text-white hover:bg-white/10"
+              }`}
+            >
+              좌우 스크롤
+            </button>
+            <button
+              onClick={() => setTimelineMode("carousel")}
+              className={`px-3 py-1.5 transition-colors ${
+                timelineMode === "carousel"
+                  ? "bg-white text-indigo-700"
+                  : "bg-transparent text-white hover:bg-white/10"
+              }`}
+            >
+              카드 넘기기
+            </button>
           </div>
         </div>
+
+        {timeline.length === 0 ? (
+          <p className="rounded-md bg-white p-6 text-center text-sm text-slate-400">
+            표시할 타임라인이 없습니다.
+          </p>
+        ) : timelineMode === "scroll" ? (
+          <div className="flex gap-3 overflow-x-auto rounded-md bg-white p-3">
+            {timeline.map((step, i) => (
+              <div
+                key={i}
+                className="flex min-w-[120px] flex-col items-center gap-1 rounded-lg border border-indigo-200 p-3 text-center shadow-sm"
+              >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
+                  {i + 1}
+                </span>
+                <span className="text-sm font-semibold text-slate-800">{step.label}</span>
+                <span className="text-xs text-slate-400">{step.duration}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            <div className="flex items-center justify-center gap-4 rounded-md bg-white p-6">
+              <button
+                onClick={goPrev}
+                disabled={timelineIndex === 0}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                ◀
+              </button>
+
+              <div className="flex w-48 flex-col items-center gap-2 rounded-lg border border-indigo-200 p-6 text-center shadow-sm">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-bold text-white">
+                  {timelineIndex + 1}
+                </span>
+                <span className="text-base font-semibold text-slate-800">
+                  {timeline[timelineIndex]?.label}
+                </span>
+                <span className="text-sm text-slate-400">{timeline[timelineIndex]?.duration}</span>
+              </div>
+
+              <button
+                onClick={goNext}
+                disabled={timelineIndex === timeline.length - 1}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
+              >
+                ▶
+              </button>
+            </div>
+            <p className="mt-3 text-center text-xs text-white/80">
+              {timelineIndex + 1} / {timeline.length}
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row">
@@ -347,10 +428,53 @@ export default function Home() {
   const [methodText, setMethodText] = useState("");
   const [scale, setScale] = useState(1);
   const [customScale, setCustomScale] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState("");
 
   const [reagents, setReagents] = useState(INITIAL_REAGENTS);
+  const [timeline, setTimeline] = useState(DUMMY_TIMELINE);
   const [sigFigs, setSigFigs] = useState(3);
   const [scaleFactor, setScaleFactor] = useState(1);
+
+  async function handleAnalyze() {
+    setIsAnalyzing(true);
+    setAnalyzeError("");
+    try {
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ methodText }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `요청 실패 (${res.status})`);
+      }
+
+      const extractedReagents = (data.reagents || []).map((r, i) => ({
+        id: i + 1,
+        name: r.name || "",
+        concentration: r.concentration || "",
+        volume: r.volume || "",
+      }));
+      nextRowId = extractedReagents.length;
+      setReagents(
+        extractedReagents.length > 0
+          ? extractedReagents
+          : [{ id: 1, name: "", concentration: "", volume: "" }]
+      );
+
+      if (data.steps && data.steps.length > 0) {
+        setTimeline(data.steps);
+      }
+
+      setScaleFactor(customScale ? Number(customScale) : scale ?? 1);
+      setStep(2);
+    } catch (err) {
+      setAnalyzeError(err.message || "분석 중 오류가 발생했습니다.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 py-10">
@@ -364,7 +488,9 @@ export default function Home() {
           setScale={setScale}
           customScale={customScale}
           setCustomScale={setCustomScale}
-          onAnalyze={() => setStep(2)}
+          onAnalyze={handleAnalyze}
+          isAnalyzing={isAnalyzing}
+          analyzeError={analyzeError}
         />
       )}
 
@@ -382,6 +508,7 @@ export default function Home() {
       {step === 3 && (
         <StepThreeResult
           reagents={reagents}
+          timeline={timeline}
           sigFigs={sigFigs}
           setSigFigs={setSigFigs}
           scaleFactor={scaleFactor}
