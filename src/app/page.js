@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { computeRow, formatAmount, mergeResults, namesNeedingLookup, scaleResult } from "../lib/chem.mjs";
+import { buildNarrative, buildTimeline, formatMinutes, formatStart } from "../lib/timeline.mjs";
 
 const SERVICE_NAME = "실험 프렙 (가제)";
 
 let nextRowId = 3;
+let nextStepId = 6;
 
 const INITIAL_REAGENTS = [
   { id: 1, name: "NaCl", concentration: "0.9 % (w/v)", volume: "500 mL" },
@@ -12,12 +15,18 @@ const INITIAL_REAGENTS = [
 ];
 
 const DUMMY_TIMELINE = [
-  { label: "시약 계량", duration: "10분" },
-  { label: "용액 혼합", duration: "5분" },
-  { label: "가열 (95°C)", duration: "15분" },
-  { label: "대기 (실온 냉각)", duration: "20분" },
-  { label: "원심분리", duration: "10분" },
+  { id: 1, label: "시약 계량", duration: "10분", repeat: 1, details: "", isWaiting: false },
+  { id: 2, label: "용액 혼합", duration: "5분", repeat: 1, details: "", isWaiting: false },
+  { id: 3, label: "가열", duration: "15분", repeat: 1, details: "95 °C", isWaiting: false },
+  { id: 4, label: "실온 냉각", duration: "20분", repeat: 1, details: "", isWaiting: true },
+  { id: 5, label: "원심분리", duration: "10분", repeat: 1, details: "", isWaiting: true },
 ];
+
+function describeDuration(item) {
+  if (item.totalMin == null) return "시간 미정";
+  const rep = item.repeat > 1 ? ` (${formatMinutes(item.perMin)} × ${item.repeat}회)` : "";
+  return `${item.approx ? "약 " : ""}${formatMinutes(item.totalMin)}${rep}`;
+}
 
 function StepIndicator({ step, onJump }) {
   const labels = ["입력", "AI 추출 결과 확인", "결과"];
@@ -128,7 +137,17 @@ function StepOneInput({
   );
 }
 
-function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onCalculate }) {
+function StepTwoReview({
+  reagents,
+  setReagents,
+  timeline,
+  setTimeline,
+  sigFigs,
+  setSigFigs,
+  onBack,
+  onCalculate,
+  isCalculating,
+}) {
   const updateRow = (id, field, value) => {
     setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   };
@@ -142,12 +161,29 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
     setReagents((rows) => rows.filter((r) => r.id !== id));
   };
 
+  const updateStep = (id, field, value) => {
+    setTimeline((steps) => steps.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+  };
+
+  const addStep = () => {
+    nextStepId += 1;
+    setTimeline((steps) => [
+      ...steps,
+      { id: nextStepId, label: "", duration: "", repeat: 1, details: "", isWaiting: false },
+    ]);
+  };
+
+  const removeStep = (id) => {
+    setTimeline((steps) => steps.filter((s) => s.id !== id));
+  };
+
   return (
     <div className="mx-auto w-full max-w-4xl px-4">
       <h1 className="text-2xl font-bold text-slate-800">{SERVICE_NAME}</h1>
 
       <div className="mt-6 flex flex-col gap-4 md:flex-row">
-        <div className="flex-1 rounded-lg bg-orange-600 p-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="rounded-lg bg-orange-600 p-4">
           <p className="mb-3 text-sm text-white">
             AI가 분석한 시약이 나오는 부분 (표로 나옴 – 각 표는 시약 이름 / 농도 / 부피 칸으로 되어
             있고, 각각이 전부 수정 가능한 입력칸)
@@ -204,6 +240,79 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
           </div>
         </div>
 
+        <div className="rounded-lg bg-orange-600 p-4">
+          <p className="mb-3 text-sm text-white">
+            AI가 분석한 실행 단계 — 시간·반복 횟수·조건·대기 여부를 확인하고 고쳐 주세요. 시간이
+            비어 있는 단계는 전체 시간 계산에서 빠집니다.
+          </p>
+          <div className="flex flex-col gap-2 rounded-md bg-white p-2">
+            {timeline.length === 0 && (
+              <p className="px-2 py-3 text-center text-sm text-slate-500">
+                추출된 단계가 없습니다. 아래 버튼으로 직접 추가할 수 있어요.
+              </p>
+            )}
+            {timeline.map((s, i) => (
+              <div key={s.id} className="rounded-md border border-orange-100 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="w-5 text-center text-xs font-bold text-orange-700">{i + 1}</span>
+                  <input
+                    value={s.label}
+                    onChange={(e) => updateStep(s.id, "label", e.target.value)}
+                    className="min-w-[8rem] flex-1 rounded px-2 py-1 text-sm text-slate-900 outline-none focus:bg-orange-50"
+                    placeholder="단계 이름"
+                  />
+                  <input
+                    value={s.duration}
+                    onChange={(e) => updateStep(s.id, "duration", e.target.value)}
+                    className="w-28 rounded px-2 py-1 text-sm text-slate-900 outline-none focus:bg-orange-50"
+                    placeholder="예: 30 min"
+                  />
+                  <label className="flex items-center gap-1 text-xs text-slate-600">
+                    ×
+                    <input
+                      type="number"
+                      min="1"
+                      value={s.repeat}
+                      onChange={(e) => updateStep(s.id, "repeat", e.target.value)}
+                      className="w-12 rounded border border-orange-200 px-1 py-1 text-sm text-slate-900 outline-none focus:bg-orange-50"
+                    />
+                    회
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={s.isWaiting}
+                      onChange={(e) => updateStep(s.id, "isWaiting", e.target.checked)}
+                      className="accent-orange-600"
+                    />
+                    대기
+                  </label>
+                  <button
+                    onClick={() => removeStep(s.id)}
+                    className="text-orange-400 hover:text-orange-700"
+                    aria-label={`${i + 1}단계 삭제`}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <input
+                  value={s.details}
+                  onChange={(e) => updateStep(s.id, "details", e.target.value)}
+                  className="mt-1 w-full rounded px-2 py-1 text-xs text-slate-700 outline-none focus:bg-orange-50"
+                  placeholder="조건 (온도·속도 등, 없으면 비워 두세요)"
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={addStep}
+            className="mt-3 rounded-md bg-white/20 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/30"
+          >
+            + 단계 추가
+          </button>
+        </div>
+        </div>
+
         <div className="flex w-full flex-col gap-3 md:w-56">
           <div className="rounded-lg bg-slate-800 p-3">
             <p className="mb-2 text-center text-xs text-white">유효숫자 설정 (좌우 버튼 형식)</p>
@@ -233,9 +342,10 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
 
           <button
             onClick={onCalculate}
-            className="rounded-lg bg-slate-800 py-3 text-sm font-semibold text-white hover:bg-slate-700"
+            disabled={isCalculating}
+            className="rounded-lg bg-slate-800 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
-            계산하기
+            {isCalculating ? "계산 중..." : "계산하기"}
           </button>
 
           <button
@@ -250,12 +360,36 @@ function StepTwoReview({ reagents, setReagents, sigFigs, setSigFigs, onBack, onC
   );
 }
 
-function StepThreeResult({ reagents, timeline, sigFigs, setSigFigs, scaleFactor, setScaleFactor, onBack }) {
+function StepThreeResult({
+  reagents,
+  timeline,
+  mwMap,
+  sigFigs,
+  setSigFigs,
+  scaleFactor,
+  setScaleFactor,
+  onBack,
+}) {
   const [timelineMode, setTimelineMode] = useState("scroll");
   const [timelineIndex, setTimelineIndex] = useState(0);
+  const [mergeMode, setMergeMode] = useState(false);
 
+  const baseResults = useMemo(
+    () => reagents.map((r) => ({ id: r.id, name: r.name, res: computeRow(r, { mwMap }) })),
+    [reagents, mwMap],
+  );
+  const tl = useMemo(() => buildTimeline(timeline), [timeline]);
+  const narrative = useMemo(() => buildNarrative(tl), [tl]);
+
+  const rows = baseResults.map((r) => (r.res.ok ? { ...r, res: scaleResult(r.res, scaleFactor) } : r));
+  const mergedRows = mergeResults(baseResults).map((m) => scaleResult(m, scaleFactor));
+  const skipped = baseResults.filter((r) => !r.res.ok);
+  const scaleText = scaleFactor === 1 ? "" : ` × ${scaleFactor}배`;
+
+  const lastIndex = tl.items.length - 1;
+  const current = tl.items[Math.min(timelineIndex, Math.max(0, lastIndex))];
   const goPrev = () => setTimelineIndex((i) => Math.max(0, i - 1));
-  const goNext = () => setTimelineIndex((i) => Math.min(timeline.length - 1, i + 1));
+  const goNext = () => setTimelineIndex((i) => Math.min(lastIndex, i + 1));
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4">
@@ -263,41 +397,109 @@ function StepThreeResult({ reagents, timeline, sigFigs, setSigFigs, scaleFactor,
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-lg bg-orange-600 p-4">
-          <p className="mb-3 text-sm text-white">
-            계량 준비표 – 시약별로 몇 g 혹은 몇 mL 달아야 하는지에 대한 표
-          </p>
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+            <p className="text-sm text-white">
+              계량 준비표 – 시약별로 몇 g 혹은 몇 mL 달아야 하는지에 대한 표
+              <span className="ml-1 whitespace-nowrap font-semibold">(×{scaleFactor})</span>
+            </p>
+            <div className="flex overflow-hidden rounded-md border border-white/50 text-xs font-medium">
+              <button
+                onClick={() => setMergeMode(false)}
+                className={`px-2.5 py-1 transition-colors ${
+                  !mergeMode ? "bg-white text-orange-700" : "text-white hover:bg-white/10"
+                }`}
+              >
+                개별
+              </button>
+              <button
+                onClick={() => setMergeMode(true)}
+                className={`px-2.5 py-1 transition-colors ${
+                  mergeMode ? "bg-white text-orange-700" : "text-white hover:bg-white/10"
+                }`}
+              >
+                통합
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto rounded-md bg-white">
             <table className="w-full text-left text-sm">
               <thead className="bg-orange-100 text-orange-900">
                 <tr>
                   <th className="px-3 py-2">시약</th>
-                  <th className="px-3 py-2">계량값</th>
+                  <th className="px-3 py-2">{mergeMode ? "총 필요량" : "계량값"}</th>
                 </tr>
               </thead>
               <tbody>
-                {reagents.map((r) => (
-                  <tr key={r.id} className="border-t border-orange-100">
-                    <td className="px-3 py-2 text-slate-900">{r.name || "(이름 없음)"}</td>
-                    <td className="px-3 py-2 text-slate-400">— (계산 결과 예정)</td>
-                  </tr>
-                ))}
+                {mergeMode
+                  ? mergedRows.map((m) => (
+                      <tr key={`${m.name}-${m.dim}-${m.unitLabel ?? ""}`} className="border-t border-orange-100 align-top">
+                        <td className="px-3 py-2 text-slate-900">
+                          {m.name}
+                          {m.rows > 1 && <span className="ml-1 text-xs text-orange-700">({m.rows}곳 합산)</span>}
+                        </td>
+                        <td className="px-3 py-2 font-semibold text-slate-900">{formatAmount(m, sigFigs)}</td>
+                      </tr>
+                    ))
+                  : rows.map((r) => (
+                      <tr key={r.id} className="border-t border-orange-100 align-top">
+                        <td className="px-3 py-2 text-slate-900">{r.name || "(이름 없음)"}</td>
+                        <td className="px-3 py-2">
+                          {r.res.ok ? (
+                            <>
+                              <span className="font-semibold text-slate-900">{formatAmount(r.res, sigFigs)}</span>
+                              <span className="mt-0.5 block text-xs text-slate-500">
+                                {r.res.basis}
+                                {scaleText}
+                              </span>
+                              {r.res.notes.map((n) => (
+                                <span key={n} className="block text-xs text-amber-700">
+                                  ※ {n}
+                                </span>
+                              ))}
+                            </>
+                          ) : (
+                            <span className="text-sm text-red-700">⚠ {r.res.reason}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
               </tbody>
             </table>
           </div>
+          {mergeMode && skipped.length > 0 && (
+            <p className="mt-2 rounded-md bg-white/15 px-3 py-2 text-xs text-white">
+              계산할 수 없어 합산에서 제외됨: {skipped.map((s) => s.name || "(이름 없음)").join(", ")} — 「개별」에서 사유를
+              확인하세요.
+            </p>
+          )}
         </div>
 
         <div className="rounded-lg bg-orange-600 p-4">
-          <p className="text-sm leading-relaxed text-white">
-            실험 타임라인에 대한 설명 (각각의 항목에 대해서 줄글로) — 추후 각 단계별 상세 설명이
-            여기에 표시됩니다.
-          </p>
+          <p className="mb-2 text-sm font-semibold text-white">실험 타임라인 설명</p>
+          <div className="flex flex-col gap-2 text-sm leading-relaxed text-white">
+            {narrative.length === 0 ? (
+              <p>설명할 단계가 없습니다. 2단계에서 실행 단계를 추가해 주세요.</p>
+            ) : (
+              narrative.map((line, i) => (
+                <p key={i} className={i === narrative.length - 1 ? "font-semibold" : undefined}>
+                  {line}
+                </p>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
       <div className="mt-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 p-5 shadow-lg ring-2 ring-indigo-300">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="flex items-center gap-2 text-base font-bold text-white">
+          <p className="flex flex-wrap items-center gap-2 text-base font-bold text-white">
             <span aria-hidden>⏱</span> 실험 타임라인
+            {tl.items.length > 0 && (
+              <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-medium">
+                총 {formatMinutes(tl.totalMin)}
+                {tl.unknownCount > 0 && ` (시간 미정 ${tl.unknownCount}단계 제외)`}
+              </span>
+            )}
           </p>
           <div className="flex overflow-hidden rounded-md border border-white/40 text-xs font-medium">
             <button
@@ -323,22 +525,28 @@ function StepThreeResult({ reagents, timeline, sigFigs, setSigFigs, scaleFactor,
           </div>
         </div>
 
-        {timeline.length === 0 ? (
-          <p className="rounded-md bg-white p-6 text-center text-sm text-slate-400">
+        {tl.items.length === 0 ? (
+          <p className="rounded-md bg-white p-6 text-center text-sm text-slate-500">
             표시할 타임라인이 없습니다.
           </p>
         ) : timelineMode === "scroll" ? (
           <div className="flex gap-3 overflow-x-auto rounded-md bg-white p-3">
-            {timeline.map((step, i) => (
+            {tl.items.map((step, i) => (
               <div
-                key={i}
-                className="flex min-w-[120px] flex-col items-center gap-1 rounded-lg border border-indigo-200 p-3 text-center shadow-sm"
+                key={step.id ?? i}
+                className="flex min-w-[140px] flex-col items-center gap-1 rounded-lg border border-indigo-200 p-3 text-center shadow-sm"
               >
                 <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">
                   {i + 1}
                 </span>
-                <span className="text-sm font-semibold text-slate-800">{step.label}</span>
-                <span className="text-xs text-slate-400">{step.duration}</span>
+                <span className="text-sm font-semibold text-slate-800">{step.label || "(이름 없음)"}</span>
+                <span className="text-xs font-medium text-indigo-700">{describeDuration(step)}</span>
+                <span className="text-[11px] text-slate-500">{formatStart(step)}</span>
+                {step.isWaiting && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                    ⏳ 대기
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -353,26 +561,31 @@ function StepThreeResult({ reagents, timeline, sigFigs, setSigFigs, scaleFactor,
                 ◀
               </button>
 
-              <div className="flex w-48 flex-col items-center gap-2 rounded-lg border border-indigo-200 p-6 text-center shadow-sm">
+              <div className="flex w-56 flex-col items-center gap-2 rounded-lg border border-indigo-200 p-6 text-center shadow-sm">
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-bold text-white">
-                  {timelineIndex + 1}
+                  {Math.min(timelineIndex, lastIndex) + 1}
                 </span>
-                <span className="text-base font-semibold text-slate-800">
-                  {timeline[timelineIndex]?.label}
-                </span>
-                <span className="text-sm text-slate-400">{timeline[timelineIndex]?.duration}</span>
+                <span className="text-base font-semibold text-slate-800">{current.label || "(이름 없음)"}</span>
+                <span className="text-sm font-medium text-indigo-700">{describeDuration(current)}</span>
+                <span className="text-xs text-slate-500">{formatStart(current)}</span>
+                {current.details && <span className="text-xs text-slate-600">{current.details}</span>}
+                {current.isWaiting && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                    ⏳ 대기
+                  </span>
+                )}
               </div>
 
               <button
                 onClick={goNext}
-                disabled={timelineIndex === timeline.length - 1}
+                disabled={timelineIndex >= lastIndex}
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-lg font-bold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 ▶
               </button>
             </div>
             <p className="mt-3 text-center text-xs text-white/80">
-              {timelineIndex + 1} / {timeline.length}
+              {Math.min(timelineIndex, lastIndex) + 1} / {tl.items.length}
             </p>
           </div>
         )}
@@ -433,6 +646,8 @@ export default function Home() {
 
   const [reagents, setReagents] = useState(INITIAL_REAGENTS);
   const [timeline, setTimeline] = useState(DUMMY_TIMELINE);
+  const [mwMap, setMwMap] = useState({});
+  const [isCalculating, setIsCalculating] = useState(false);
   const [sigFigs, setSigFigs] = useState(3);
   const [scaleFactor, setScaleFactor] = useState(1);
 
@@ -463,9 +678,16 @@ export default function Home() {
           : [{ id: 1, name: "", concentration: "", volume: "" }]
       );
 
-      if (data.steps && data.steps.length > 0) {
-        setTimeline(data.steps);
-      }
+      const extractedSteps = (data.steps || []).map((s, i) => ({
+        id: i + 1,
+        label: s.label || "",
+        duration: s.duration || "",
+        repeat: s.repeat || 1,
+        details: s.details || "",
+        isWaiting: Boolean(s.isWaiting),
+      }));
+      nextStepId = extractedSteps.length;
+      setTimeline(extractedSteps);
 
       setScaleFactor(customScale ? Number(customScale) : scale ?? 1);
       setStep(2);
@@ -473,6 +695,30 @@ export default function Home() {
       setAnalyzeError(err.message || "분석 중 오류가 발생했습니다.");
     } finally {
       setIsAnalyzing(false);
+    }
+  }
+
+  async function handleCalculate() {
+    setIsCalculating(true);
+    try {
+      const targets = namesNeedingLookup(reagents, mwMap);
+      if (targets.length > 0) {
+        const found = await Promise.all(
+          targets.map(async ({ key, name }) => {
+            try {
+              const res = await fetch(`/api/mw?name=${encodeURIComponent(name)}`);
+              const data = await res.json();
+              return [key, res.ok ? { mw: data.mw, formula: data.formula } : { notFound: true }];
+            } catch {
+              return [key, { notFound: true }];
+            }
+          }),
+        );
+        setMwMap((prev) => ({ ...prev, ...Object.fromEntries(found) }));
+      }
+      setStep(3);
+    } finally {
+      setIsCalculating(false);
     }
   }
 
@@ -498,10 +744,13 @@ export default function Home() {
         <StepTwoReview
           reagents={reagents}
           setReagents={setReagents}
+          timeline={timeline}
+          setTimeline={setTimeline}
           sigFigs={sigFigs}
           setSigFigs={setSigFigs}
           onBack={() => setStep(1)}
-          onCalculate={() => setStep(3)}
+          onCalculate={handleCalculate}
+          isCalculating={isCalculating}
         />
       )}
 
@@ -509,6 +758,7 @@ export default function Home() {
         <StepThreeResult
           reagents={reagents}
           timeline={timeline}
+          mwMap={mwMap}
           sigFigs={sigFigs}
           setSigFigs={setSigFigs}
           scaleFactor={scaleFactor}

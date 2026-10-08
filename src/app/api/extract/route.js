@@ -2,6 +2,7 @@ const MODEL = "gemini-3.8-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const MAX_RETRIES = 2;
 const RETRYABLE_STATUS = new Set([429, 503]);
+const REQUEST_TIMEOUT_MS = 45000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -29,8 +30,11 @@ const RESPONSE_SCHEMA = {
       items: {
         type: "OBJECT",
         properties: {
-          label: { type: "STRING", description: "단계 이름 (예: 원심분리, 가열)" },
-          duration: { type: "STRING", description: "소요 또는 대기 시간 (예: 10분, overnight)" },
+          label: { type: "STRING", description: "짧은 한국어 단계 이름 (예: 원심분리, 얼음 위 배양)" },
+          duration: { type: "STRING", description: "한 번 수행하는 시간을 '숫자 단위'로 (예: 30 min, 1 h, overnight). 없으면 빈 문자열" },
+          repeat: { type: "INTEGER", description: "반복 횟수. 반복이 없으면 1" },
+          details: { type: "STRING", description: "온도·속도(rpm, g)·pH 등 조건. 없으면 빈 문자열" },
+          isWaiting: { type: "BOOLEAN", description: "사용자가 손을 쓰지 않고 기다리는 단계(배양, 반응, 냉각, 방치, 원심분리 등)면 true" },
         },
         required: ["label"],
       },
@@ -39,9 +43,18 @@ const RESPONSE_SCHEMA = {
   required: ["reagents", "steps"],
 };
 
-const PROMPT_PREFIX = `너는 실험 논문의 Methods 섹션을 읽고 필요한 시약과 실행 순서를 구조화하는 도우미이다.
-아래 Methods 텍스트에서 (1) 등장하는 모든 시약의 이름·목표 농도·목표 부피와 (2) 실행 순서를 단계별로 소요/대기 시간과 함께 추출하라.
-텍스트에 명시되지 않은 값은 빈 문자열로 두고, 절대로 없는 값을 지어내지 마라.
+const PROMPT_PREFIX = `너는 실험 논문의 Methods 섹션을 읽고 실험 준비에 필요한 정보를 구조화하는 도우미이다.
+계산은 하지 말고, 텍스트에 적힌 값을 옮겨 적기만 하라. 텍스트에 없는 값은 빈 문자열로 두고 절대 지어내지 마라.
+
+[시약 reagents]
+- 용액(버퍼 등)을 이루는 성분마다 한 줄씩 만든다. 같은 시약이 여러 용액에 쓰이면 용액마다 따로 한 줄씩 만든다.
+- name: 화학물질 이름만 영문으로 적는다. 'buffer', 'solution' 같은 말은 빼고, pH는 필요하면 괄호로 덧붙인다. (예: 'Tris-HCl (pH 7.5)')
+- concentration: 목표 농도를 '숫자 단위' 형식으로 적는다. (예: '50 mM', '2 mg/mL', '0.9 % (w/v)', '1 % (v/v)') 텍스트에 w/v, v/v가 적혀 있지 않으면 '1 %'처럼 %만 적는다.
+- volume: 그 시약이 들어가는 용액의 최종 부피, 또는 시약 자체의 양을 '숫자 단위'로 적는다. (예: '100 mL', '50 µL', '20 units') 용액의 최종 부피가 적혀 있으면 그 용액의 모든 성분 줄에 같은 부피를 넣는다.
+
+[실행 단계 steps]
+- 실험 조작을 순서대로 나열한다. 용액 제조는 소요 시간이 적혀 있을 때만 단계로 넣는다.
+- 'washed 3 times for 10 min each'는 duration '10 min', repeat 3으로 적는다.
 
 Methods 텍스트:
 """
@@ -71,6 +84,7 @@ export async function POST(request) {
 
   let geminiRes;
   let lastErrBody = "";
+  let timeoutRetried = false;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       geminiRes = await fetch(`${ENDPOINT}?key=${apiKey}`, {
@@ -83,8 +97,19 @@ export async function POST(request) {
             responseSchema: RESPONSE_SCHEMA,
           },
         }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
+      if (err.name === "TimeoutError") {
+        if (!timeoutRetried && attempt < MAX_RETRIES) {
+          timeoutRetried = true;
+          continue;
+        }
+        return Response.json(
+          { error: "Gemini 응답이 오지 않아 중단했습니다. 잠시 후 다시 시도해 주세요." },
+          { status: 504 }
+        );
+      }
       return Response.json(
         { error: `Gemini API 호출 중 네트워크 오류: ${err.message}` },
         { status: 502 }
@@ -118,8 +143,19 @@ export async function POST(request) {
     return Response.json({ error: "Gemini 응답을 JSON으로 해석하지 못했습니다." }, { status: 502 });
   }
 
+  const text$ = (v) => (typeof v === "string" ? v.trim() : "");
   return Response.json({
-    reagents: Array.isArray(parsed.reagents) ? parsed.reagents : [],
-    steps: Array.isArray(parsed.steps) ? parsed.steps : [],
+    reagents: (Array.isArray(parsed.reagents) ? parsed.reagents : []).map((r) => ({
+      name: text$(r.name),
+      concentration: text$(r.concentration),
+      volume: text$(r.volume),
+    })),
+    steps: (Array.isArray(parsed.steps) ? parsed.steps : []).map((s) => ({
+      label: text$(s.label),
+      duration: text$(s.duration),
+      repeat: Math.max(1, Math.floor(Number(s.repeat)) || 1),
+      details: text$(s.details),
+      isWaiting: Boolean(s.isWaiting),
+    })),
   });
 }

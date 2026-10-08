@@ -1,0 +1,50 @@
+[
+  {
+    "id": "lysis",
+    "title": "세포 용해 버퍼 (몰농도 + % 혼합, 부피 명시)",
+    "methods": "Lysis buffer was prepared as 100 mL of 50 mM Tris-HCl (pH 7.5), 150 mM NaCl, 1 mM EDTA and 1% Triton X-100. Cells (1 x 10^7) were resuspended in 1 mL of lysis buffer and incubated on ice for 30 minutes, then centrifuged at 14,000 rpm for 15 minutes at 4 °C. The supernatant was mixed with 50 mL of sample buffer containing 2% SDS and 100 mM DTT and heated at 95 °C for 5 minutes.",
+    "expect": {
+      "reagents": [
+        { "name": "Tris-HCl", "dim": "mass", "value": 0.788, "note": "50 mM x 0.1 L x 157.6" },
+        { "name": "NaCl", "dim": "mass", "value": 0.8766, "note": "150 mM x 0.1 L x 58.44" },
+        { "name": "EDTA", "dim": "mass", "value": 0.029224, "note": "1 mM x 0.1 L x 292.24" },
+        { "name": "Triton X-100", "dim": "volume", "value": 1, "note": "1% v/v of 100 mL" },
+        { "name": "SDS", "dim": "mass", "value": 1.0, "note": "2% w/v of 50 mL" },
+        { "name": "DTT", "dim": "mass", "value": 0.77125, "note": "100 mM x 0.05 L x 154.25" }
+      ],
+      "totalMinutes": 50
+    }
+  },
+  {
+    "id": "duplicates",
+    "title": "같은 시약이 두 용액에 중복 (통합 준비 리스트 검증)",
+    "methods": "Blocking buffer: 5% (w/v) BSA in 20 mL of 20 mM Tris-HCl (pH 7.6), 150 mM NaCl and 0.1% (v/v) Tween-20. Wash buffer: 500 mL of 20 mM Tris-HCl (pH 7.6), 150 mM NaCl and 0.1% (v/v) Tween-20. Membranes were blocked for 1 hour at room temperature, incubated with the primary antibody overnight at 4 °C, and washed 3 times for 10 minutes each.",
+    "expect": {
+      "merged": [
+        { "name": "BSA", "dim": "mass", "value": 1.0, "note": "5% w/v x 20 mL" },
+        { "name": "Tris-HCl", "dim": "mass", "value": 1.63904, "note": "20 mM x (0.02+0.5) L x 157.6" },
+        { "name": "NaCl", "dim": "mass", "value": 4.55832, "note": "150 mM x 0.52 L x 58.44" },
+        { "name": "Tween-20", "dim": "volume", "value": 0.52, "note": "0.1% v/v x 520 mL" }
+      ],
+      "totalMinutes": 810
+    }
+  },
+  {
+    "id": "edge",
+    "title": "단위 변형·수화물·PubChem 조회·계산 거부(농축 HCl) 혼합",
+    "methods": "The reaction mix (50 µL) contained 5 mM MgCl2·6H2O, 1 mM DTT and 20 units of EcoRI. Lysozyme was dissolved at 10 mg/mL in 5 mL of 10 mM Tris-HCl (pH 8.0). The pH was adjusted with 1 M HCl. Cells were grown in 10 mL of medium supplemented with 2 mM L-glutamine and 1 mM sodium pyruvate. The reaction was incubated at 37 °C for 1 hour and then stopped by heating at 65 °C for 10-15 minutes.",
+    "expect": {
+      "reagents": [
+        { "name": "MgCl2·6H2O", "dim": "mass", "value": 5.0825e-5, "note": "5 mM x 50 uL x 203.3" },
+        { "name": "DTT", "dim": "mass", "value": 7.7125e-6, "note": "1 mM x 50 uL x 154.25" },
+        { "name": "EcoRI", "dim": "count", "value": 20 },
+        { "name": "lysozyme", "dim": "mass", "value": 0.05, "note": "10 mg/mL x 5 mL" },
+        { "name": "Tris-HCl", "dim": "mass", "value": 0.00788, "note": "10 mM x 5 mL x 157.6" },
+        { "name": "L-glutamine", "dim": "mass", "value": 0.002923, "tolerance": 0.003, "note": "PubChem MW 146.14" },
+        { "name": "sodium pyruvate", "dim": "mass", "value": 0.0011004, "tolerance": 0.003, "note": "PubChem MW 110.04" }
+      ],
+      "refused": ["HCl"],
+      "totalMinutes": 75
+    }
+  }
+]
