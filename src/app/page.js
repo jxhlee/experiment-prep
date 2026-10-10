@@ -660,9 +660,10 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ methodText }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || `요청 실패 (${res.status})`);
+        const timedOut = res.status === 504 ? "서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요." : "";
+        throw new Error(data.error || timedOut || `요청 실패 (${res.status})`);
       }
 
       const extractedReagents = (data.reagents || []).map((r, i) => ({

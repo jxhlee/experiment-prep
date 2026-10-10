@@ -2,10 +2,27 @@ const MODEL = "gemini-3.8-flash";
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 const MAX_RETRIES = 2;
 const RETRYABLE_STATUS = new Set([429, 503]);
-const REQUEST_TIMEOUT_MS = 45000;
+// Vercel 함수 제한(60초 이내)에 맞춰, 응답 없는 요청 1회를 끊고 재시도해도 넘지 않게 잡는다.
+export const maxDuration = 60;
+const REQUEST_TIMEOUT_MS = 28000;
+const DEADLINE_MS = 55000;
+const MIN_RETRY_WINDOW_MS = 8000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 429 본문의 "Please retry in 23h53m8.7s"에서 대기 시간(초)을 읽는다.
+function parseRetryAfterSec(body) {
+  const m = body.match(/retry in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i);
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  return Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0);
+}
+
+function formatWait(sec) {
+  const h = Math.floor(sec / 3600);
+  const min = Math.ceil((sec % 3600) / 60);
+  return h > 0 ? `약 ${h}시간 ${min}분` : `약 ${min}분`;
 }
 
 const RESPONSE_SCHEMA = {
@@ -82,10 +99,16 @@ export async function POST(request) {
 
   const prompt = `${PROMPT_PREFIX}${methodText.trim()}\n"""`;
 
+  const busy = () =>
+    Response.json({ error: "Gemini 서버가 혼잡해 응답하지 못했습니다. 잠시 후 다시 시도해 주세요." }, { status: 503 });
+
   let geminiRes;
   let lastErrBody = "";
   let timeoutRetried = false;
+  const started = Date.now();
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const remaining = DEADLINE_MS - (Date.now() - started);
+    if (attempt > 0 && remaining < MIN_RETRY_WINDOW_MS) return busy();
     try {
       geminiRes = await fetch(`${ENDPOINT}?key=${apiKey}`, {
         method: "POST",
@@ -97,7 +120,7 @@ export async function POST(request) {
             responseSchema: RESPONSE_SCHEMA,
           },
         }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(Math.min(REQUEST_TIMEOUT_MS, remaining)),
       });
     } catch (err) {
       if (err.name === "TimeoutError") {
@@ -119,8 +142,18 @@ export async function POST(request) {
     if (geminiRes.ok) break;
 
     lastErrBody = await geminiRes.text().catch(() => "");
+    if (geminiRes.status === 429) {
+      const waitSec = parseRetryAfterSec(lastErrBody);
+      if (waitSec != null && waitSec > 20) {
+        return Response.json(
+          { error: `Gemini 무료 사용 한도를 모두 사용했습니다. ${formatWait(waitSec)} 뒤에 다시 시도해 주세요.` },
+          { status: 429 }
+        );
+      }
+    }
     const shouldRetry = RETRYABLE_STATUS.has(geminiRes.status) && attempt < MAX_RETRIES;
     if (!shouldRetry) {
+      if (geminiRes.status === 503) return busy();
       return Response.json(
         { error: `Gemini API 오류 (${geminiRes.status}): ${lastErrBody.slice(0, 500)}` },
         { status: 502 }
