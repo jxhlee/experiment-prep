@@ -197,3 +197,60 @@ test("시약 부가 안내(평균 분자량 등)는 분자량을 쓰는 몰농�
   const molar = computeRow(row("Triton X-100", "1 mM", "100 mL"));
   assert.ok(molar.notes.some((n) => n.includes("평균 분자량")));
 });
+
+test("인산 완충액 같은 이름은 PubChem 이온 분자량으로 계산하지 않는다", () => {
+  const r = computeRow(row("phosphate buffer (pH 6)", "25 mM", "100 mL"), {
+    mwMap: { phosphate: { mw: 94.971, formula: "O4P-3" } },
+  });
+  assert.equal(r.ok, false);
+  assert.ok(r.reason.includes("구성 성분"));
+  assert.deepEqual(namesNeedingLookup([row("phosphate buffer", "25 mM", "100 mL")]), []);
+  // 구체적인 염 이름은 그대로 계산된다
+  close(computeRow(row("sodium phosphate dibasic", "25 mM", "100 mL")).value, 0.025 * 0.1 * 141.96);
+});
+
+test("암모니아수 표기 변형도 농축 원액으로 보고 계산을 거부한다", () => {
+  for (const name of ["NH3·H2O", "aqueous ammonia", "ammonium hydroxide", "ammonia water"]) {
+    const r = computeRow(row(name, "25 %", "4 mL"));
+    assert.equal(r.ok, false, name);
+    assert.ok(r.reason.includes("농축 원액"), name);
+  }
+});
+
+test("농도 칸에 양(몰·질량)이 적힌 경우는 그 부피에 녹이는 양으로 해석", () => {
+  const mwMap = {};
+  const mole = computeRow(row("Bi(NO3)3·5H2O", "2.5 mmol", "20 mL"), { mwMap });
+  close(mole.value, 2.5e-3 * 485.07);
+  assert.ok(mole.notes.some((n) => n.includes("녹이는 양")));
+
+  const mass = computeRow(row("NH4VO3", "0.292 g", "20 mL"));
+  assert.equal(mass.dim, "mass");
+  close(mass.value, 0.292);
+
+  const noVolume = computeRow(row("Bi(NO3)3·5H2O", "2.5 mmol", ""));
+  close(noVolume.value, 2.5e-3 * 485.07);
+
+  // 분자량 조회가 필요한 이름이면 조회 대상에 포함된다
+  assert.deepEqual(namesNeedingLookup([row("sodium pyruvate", "1 mmol", "10 mL")]), [{ key: "sodiumpyruvate", name: "sodium pyruvate" }]);
+});
+
+test("농도 없이 부피만 있으면: 액체는 그대로, 그 외 시약은 해석했다는 안내를 붙인다", () => {
+  const water = computeRow(row("distilled water", "", "800 mL"));
+  assert.equal(water.dim, "volume");
+  close(water.value, 800);
+  assert.equal(water.notes.length, 0);
+  assert.equal(computeRow(row("ethylene glycol", "", "10 mL")).notes.length, 0);
+
+  const salt = computeRow(row("Na3RhCl6", "", "100 mL"));
+  assert.equal(salt.ok, true);
+  assert.ok(salt.notes.some((n) => n.includes("용액 전체 부피")));
+});
+
+test("논문에 자주 나오는 무기 시약 표기는 내장 DB로 계산", () => {
+  close(computeRow(row("K3[Fe(CN)6]", "0.5 mM", "100 mL")).value, 0.0005 * 0.1 * 329.24);
+  close(computeRow(row("NaIO3", "20 mM", "100 mL")).value, 0.02 * 0.1 * 197.89);
+  const k4 = computeRow(row("K4[Fe(CN)6]", "0.8 mM", "100 mL"));
+  close(k4.value, 0.0008 * 0.1 * 368.35);
+  assert.ok(k4.notes.some((n) => n.includes("3수화물")));
+  assert.equal(computeRow(row("HAuCl4", "1 mM", "10 mL")).ok, true);
+});

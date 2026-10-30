@@ -3,8 +3,20 @@
 import { useMemo, useState } from "react";
 import { computeRow, formatAmount, mergeResults, namesNeedingLookup, scaleResult } from "../lib/chem.mjs";
 import { buildNarrative, buildTimeline, formatMinutes, formatStart } from "../lib/timeline.mjs";
+import { ExtractError, MAX_CHARS_OWN_KEY, MAX_CHARS_SERVER } from "../lib/gemini.mjs";
+import {
+  extractViaOwnKey,
+  extractViaServer,
+  hashText,
+  loadCachedExtraction,
+  saveCachedExtraction,
+} from "../lib/extract-client.mjs";
+import { useSessionPref } from "../lib/use-session-pref";
 
 const SERVICE_NAME = "실험 프렙 (가제)";
+
+// 서비스 API가 한도·혼잡으로 막혔을 때 "내 API 키"로 바꿔 보라고 안내할 오류 종류
+const SUGGEST_OWN_KEY = new Set(["quota", "rate", "busy", "timeout", "too-long"]);
 
 let nextRowId = 3;
 let nextStepId = 6;
@@ -70,7 +82,16 @@ function StepOneInput({
   onAnalyze,
   isAnalyzing,
   analyzeError,
+  apiMode,
+  setApiMode,
+  apiKey,
+  setApiKey,
 }) {
+  const limit = apiMode === "own" ? MAX_CHARS_OWN_KEY : MAX_CHARS_SERVER;
+  const length = methodText.trim().length;
+  const overLimit = length > limit;
+  const keyMissing = apiMode === "own" && apiKey.trim().length < 20;
+
   return (
     <div className="mx-auto w-full max-w-3xl px-4">
       <h1 className="text-center text-2xl font-bold text-slate-800">{SERVICE_NAME}</h1>
@@ -87,9 +108,63 @@ function StepOneInput({
           className="w-full resize-y rounded-md bg-slate-800 p-4 text-white placeholder-slate-300 outline-none"
         />
       </div>
+      <p className={`mt-1 text-right text-xs ${overLimit ? "font-semibold text-red-600" : "text-slate-500"}`}>
+        {length.toLocaleString("ko-KR")} / {limit.toLocaleString("ko-KR")}자
+        {overLimit && " — 한도를 넘었어요. 합성·준비 부분만 붙여넣어 주세요."}
+      </p>
+
+      <div className="mt-3 rounded-lg bg-slate-800 p-4 text-white">
+        <p className="mb-2 text-center text-sm">AI 호출 방식</p>
+        <div className="flex overflow-hidden rounded-md border border-white/40 text-sm font-medium">
+          {[
+            ["server", "서비스 API 사용"],
+            ["own", "내 Gemini API 키 사용"],
+          ].map(([mode, label]) => (
+            <button
+              key={mode}
+              onClick={() => setApiMode(mode)}
+              className={`flex-1 px-3 py-2 transition-colors ${
+                apiMode === mode ? "bg-white text-slate-800" : "text-white hover:bg-white/10"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {apiMode === "server" ? (
+          <p className="mt-2 text-xs leading-relaxed text-slate-300">
+            서비스 운영자의 API를 씁니다. 하루 호출 한도가 있어 한 번에 {MAX_CHARS_SERVER.toLocaleString("ko-KR")}자까지
+            분석하고, 느리거나 막히면 다른 모델로 자동 전환합니다. 같은 텍스트는 저장된 결과를 다시 씁니다.
+          </p>
+        ) : (
+          <div className="mt-2">
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Gemini API 키 붙여넣기"
+              autoComplete="off"
+              spellCheck={false}
+              className="h-9 w-full rounded-md bg-slate-700 px-3 text-sm text-white placeholder-slate-300 outline-none focus:bg-slate-600"
+            />
+            <p className="mt-2 text-xs leading-relaxed text-slate-300">
+              키는 이 브라우저에서 Google(Gemini)로만 보내고 우리 서버에는 보내지 않습니다. 이 탭을 닫으면 지워집니다.
+              내 키의 한도를 쓰므로 {MAX_CHARS_OWN_KEY.toLocaleString("ko-KR")}자까지 분석할 수 있고, 같은 텍스트는 저장된
+              결과를 다시 씁니다.
+            </p>
+          </div>
+        )}
+      </div>
 
       {analyzeError && (
-        <p className="mt-3 rounded-md bg-red-50 px-4 py-2 text-sm text-red-600">{analyzeError}</p>
+        <div className="mt-3 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">
+          <p>{analyzeError.message}</p>
+          {apiMode === "server" && SUGGEST_OWN_KEY.has(analyzeError.kind) && (
+            <button onClick={() => setApiMode("own")} className="mt-1 font-semibold underline">
+              내 Gemini API 키로 분석하기
+            </button>
+          )}
+        </div>
       )}
 
       <div className="mt-4 flex flex-col gap-4 sm:flex-row">
@@ -126,8 +201,9 @@ function StepOneInput({
         </div>
 
         <button
-          onClick={onAnalyze}
-          disabled={!methodText.trim() || isAnalyzing}
+          onClick={() => onAnalyze()}
+          disabled={!methodText.trim() || isAnalyzing || overLimit || keyMissing}
+          title={keyMissing ? "Gemini API 키를 입력해 주세요" : undefined}
           className="rounded-lg bg-slate-800 px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isAnalyzing ? "분석 중..." : "분석하기"}
@@ -147,6 +223,10 @@ function StepTwoReview({
   onBack,
   onCalculate,
   isCalculating,
+  analysisMeta,
+  analyzeError,
+  isAnalyzing,
+  onReanalyze,
 }) {
   const updateRow = (id, field, value) => {
     setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -180,6 +260,27 @@ function StepTwoReview({
   return (
     <div className="mx-auto w-full max-w-4xl px-4">
       <h1 className="text-2xl font-bold text-slate-800">{SERVICE_NAME}</h1>
+
+      {analysisMeta && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-white px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
+          <span>
+            {analysisMeta.fromCache
+              ? "저장된 분석 결과를 불러왔어요 (AI 호출 없음)"
+              : `분석 모델: ${analysisMeta.model || "알 수 없음"}`}
+          </span>
+          <button
+            onClick={onReanalyze}
+            disabled={isAnalyzing}
+            className="font-semibold text-orange-700 underline disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isAnalyzing ? "분석 중..." : "AI로 다시 분석"}
+          </button>
+          <span className="text-slate-500">(수정한 내용은 사라져요)</span>
+        </div>
+      )}
+      {analyzeError && (
+        <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">{analyzeError.message}</p>
+      )}
 
       <div className="mt-6 flex flex-col gap-4 md:flex-row">
         <div className="flex min-w-0 flex-1 flex-col gap-4">
@@ -642,7 +743,10 @@ export default function Home() {
   const [scale, setScale] = useState(1);
   const [customScale, setCustomScale] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analyzeError, setAnalyzeError] = useState("");
+  const [analyzeError, setAnalyzeError] = useState(null);
+  const [analysisMeta, setAnalysisMeta] = useState(null);
+  const [apiMode, setApiMode] = useSessionPref("ep:api-mode", "server");
+  const [apiKey, setApiKey] = useSessionPref("ep:api-key", "");
 
   const [reagents, setReagents] = useState(INITIAL_REAGENTS);
   const [timeline, setTimeline] = useState(DUMMY_TIMELINE);
@@ -651,19 +755,30 @@ export default function Home() {
   const [sigFigs, setSigFigs] = useState(3);
   const [scaleFactor, setScaleFactor] = useState(1);
 
-  async function handleAnalyze() {
+  async function handleAnalyze({ force = false } = {}) {
     setIsAnalyzing(true);
-    setAnalyzeError("");
+    setAnalyzeError(null);
     try {
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ methodText }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const timedOut = res.status === 504 ? "서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요." : "";
-        throw new Error(data.error || timedOut || `요청 실패 (${res.status})`);
+      const text = methodText.trim();
+      const hash = await hashText(text);
+      let data = force ? null : loadCachedExtraction(hash);
+      const fromCache = Boolean(data);
+
+      if (!data) {
+        const limit = apiMode === "own" ? MAX_CHARS_OWN_KEY : MAX_CHARS_SERVER;
+        if (text.length > limit) {
+          throw new ExtractError("too-long", {
+            message: `한 번에 ${limit.toLocaleString("ko-KR")}자까지 분석할 수 있어요 (현재 ${text.length.toLocaleString("ko-KR")}자).`,
+          });
+        }
+        if (apiMode === "own") {
+          const key = apiKey.trim();
+          if (key.length < 20 || /\s/.test(key)) throw new ExtractError("auth", { message: "Gemini API 키를 입력해 주세요." });
+          data = await extractViaOwnKey(key, text);
+        } else {
+          data = await extractViaServer(text);
+        }
+        saveCachedExtraction(hash, data);
       }
 
       const extractedReagents = (data.reagents || []).map((r, i) => ({
@@ -690,10 +805,11 @@ export default function Home() {
       nextStepId = extractedSteps.length;
       setTimeline(extractedSteps);
 
+      setAnalysisMeta({ fromCache, model: data.model || "" });
       setScaleFactor(customScale ? Number(customScale) : scale ?? 1);
       setStep(2);
     } catch (err) {
-      setAnalyzeError(err.message || "분석 중 오류가 발생했습니다.");
+      setAnalyzeError({ message: err.message || "분석 중 오류가 발생했습니다.", kind: err.kind });
     } finally {
       setIsAnalyzing(false);
     }
@@ -738,6 +854,10 @@ export default function Home() {
           onAnalyze={handleAnalyze}
           isAnalyzing={isAnalyzing}
           analyzeError={analyzeError}
+          apiMode={apiMode}
+          setApiMode={setApiMode}
+          apiKey={apiKey}
+          setApiKey={setApiKey}
         />
       )}
 
@@ -752,6 +872,10 @@ export default function Home() {
           onBack={() => setStep(1)}
           onCalculate={handleCalculate}
           isCalculating={isCalculating}
+          analysisMeta={analysisMeta}
+          analyzeError={analyzeError}
+          isAnalyzing={isAnalyzing}
+          onReanalyze={() => handleAnalyze({ force: true })}
         />
       )}
 

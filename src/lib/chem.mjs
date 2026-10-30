@@ -69,16 +69,37 @@ const DB_ENTRIES = [
   { display: "Tween-20", names: ["Tween-20", "Tween 20", "polysorbate 20"], mw: 1227.54, state: "liquid", density: 1.095 },
   { display: "Tween-80", names: ["Tween-80", "Tween 80", "polysorbate 80"], mw: 1310, state: "liquid", density: 1.064 },
   { display: "NP-40", names: ["NP-40", "NP40", "Igepal CA-630"], mw: 603, state: "liquid", density: 1.06 },
+  { display: "Water", names: ["water", "distilled water", "deionized water", "DI water", "ddH2O", "H2O", "Milli-Q water", "ultrapure water"], mw: 18.015, state: "liquid", density: 1.0 },
+  { display: "Ethylene glycol", names: ["ethylene glycol", "(CH2OH)2"], mw: 62.07, state: "liquid", density: 1.113 },
+  { display: "Acetone", names: ["acetone"], mw: 58.08, state: "liquid", density: 0.791 },
+  { display: "Acetonitrile", names: ["acetonitrile"], mw: 41.05, state: "liquid", density: 0.786 },
+  { display: "DMF", names: ["DMF", "dimethylformamide", "N,N-dimethylformamide"], mw: 73.09, state: "liquid", density: 0.944 },
+  { display: "Chloroform", names: ["chloroform"], mw: 119.38, state: "liquid", density: 1.489 },
+  { display: "Hexane", names: ["hexane", "n-hexane"], mw: 86.18, state: "liquid", density: 0.659 },
+  { display: "Toluene", names: ["toluene"], mw: 92.14, state: "liquid", density: 0.867 },
+  { display: "Ethyl acetate", names: ["ethyl acetate"], mw: 88.11, state: "liquid", density: 0.902 },
+  { display: "Dichloromethane", names: ["dichloromethane", "DCM", "methylene chloride"], mw: 84.93, state: "liquid", density: 1.326 },
+  { display: "Bi(NO3)3·5H2O", names: ["Bi(NO3)3·5H2O", "bismuth nitrate pentahydrate", "bismuth(III) nitrate pentahydrate"], mw: 485.07 },
+  { display: "NH4VO3", names: ["NH4VO3", "ammonium metavanadate", "ammonium vanadate"], mw: 116.98 },
+  { display: "Na2MoO4", names: ["Na2MoO4", "sodium molybdate"], mw: 205.92, note: "무수물 기준(205.92). 2수화물(241.95)을 쓰면 그 값을 확인하세요." },
+  { display: "K3[Fe(CN)6]", names: ["K3[Fe(CN)6]", "potassium ferricyanide", "potassium hexacyanoferrate(III)"], mw: 329.24 },
+  { display: "K4[Fe(CN)6]", names: ["K4[Fe(CN)6]", "potassium ferrocyanide", "potassium hexacyanoferrate(II)"], mw: 368.35, note: "무수물 기준(368.35). 3수화물(422.39)을 쓰면 시약병 라벨의 분자량을 확인하세요." },
+  { display: "NaIO3", names: ["NaIO3", "sodium iodate"], mw: 197.89 },
+  { display: "K2CrO4", names: ["K2CrO4", "potassium chromate"], mw: 194.19 },
+  { display: "CoSO4", names: ["CoSO4", "cobalt sulfate", "cobalt(II) sulfate"], mw: 154.99, note: "무수물 기준(154.99). 7수화물(281.10)이면 시약병 라벨의 분자량을 확인하세요." },
+  { display: "HAuCl4", names: ["HAuCl4", "chloroauric acid", "tetrachloroauric acid"], mw: 339.79, note: "무수물 기준(339.79). 보통 3수화물(393.83)이나 수화물로 판매되니 라벨을 확인하세요." },
   { display: "HCl", names: ["HCl", "hydrochloric acid"], mw: 36.46, needsStock: true },
   { display: "H2SO4", names: ["H2SO4", "sulfuric acid"], mw: 98.08, needsStock: true },
   { display: "HNO3", names: ["HNO3", "nitric acid"], mw: 63.01, needsStock: true },
   { display: "H3PO4", names: ["H3PO4", "phosphoric acid"], mw: 98.0, needsStock: true },
-  { display: "NH4OH", names: ["NH4OH", "ammonium hydroxide", "ammonia solution"], mw: 35.05, needsStock: true },
+  { display: "NH4OH", names: ["NH4OH", "NH3·H2O", "ammonium hydroxide", "ammonia solution", "ammonia water", "aqueous ammonia", "ammonia"], mw: 35.05, needsStock: true },
 ];
 
-// 분자량 하나로 정의할 수 없는 혼합 용액·배지 이름
+// 분자량 하나로 정의할 수 없는 혼합 용액·배지 이름. 인산·시트르산·붕산 완충액은
+// 염의 종류와 비율에 따라 달라져서, PubChem이 돌려주는 이온 하나의 분자량을 쓰면 틀린 값이 나온다.
 const MIXTURE_KEYS = new Set([
   "pbs", "pbst", "tbs", "tbst", "te", "tae", "tbe", "lb", "dmem", "rpmi", "fbs", "ripa", "laemmli", "medium", "media",
+  "phosphate", "sodiumphosphate", "potassiumphosphate", "citrate", "borate",
 ]);
 
 const IGNORABLE_PAREN = /\bph\b|\bph\s*\d|w\/v|v\/v|w\/w|sigma|thermo|invitrogen|merck|aldrich|fisher|anhydrous|grade|stock|#|\d\s*%/i;
@@ -190,7 +211,11 @@ function describeRow(row) {
 }
 
 function needsMW(d) {
-  return (d.conc?.type === "molar" && d.vol?.type === "volume") || (!d.conc && d.vol?.type === "mole");
+  return (
+    (d.conc?.type === "molar" && d.vol?.type === "volume") ||
+    (!d.conc && d.vol?.type === "mole") ||
+    d.conc?.type === "mole"
+  );
 }
 
 /** 계산에 분자량이 필요한데 내장 DB에도 캐시에도 없는 시약 → PubChem 조회 대상 */
@@ -244,10 +269,24 @@ export function computeRow(row, { mwMap = {} } = {}) {
   const notes = [];
   const done = (r) => ({ ok: true, notes, ...r });
 
+  // "2.5 mmol / 20 mL"처럼 농도 칸에 양(몰·질량)이 적힌 경우는 그 양을 해당 부피에 녹이는 것으로 본다.
+  if (d.conc && (d.conc.type === "mass" || d.conc.type === "mole")) {
+    if (d.vol) notes.push(`${d.concStr}을(를) ${d.volStr}에 녹이는 양으로 해석함`);
+    if (d.conc.type === "mass") return done({ dim: "mass", value: d.conc.g, basis: `${d.concStr} (입력값 그대로)` });
+    const r = resolveMW(d, entry, mwMap);
+    if (r.fail) return fail(r.fail, r.code);
+    if (r.note) notes.push(r.note);
+    return done({ dim: "mass", value: d.conc.mol * r.mw, basis: `${d.concStr} × ${num(r.mw)} g/mol`, mw: r.mw, mwSource: r.source });
+  }
+
   if (!d.conc) {
     const basis = `${d.volStr} (입력값 그대로)`;
     if (d.vol.type === "mass") return done({ dim: "mass", value: d.vol.g, basis });
-    if (d.vol.type === "volume") return done({ dim: "volume", value: d.vol.mL, basis });
+    if (d.vol.type === "volume") {
+      // 농도 없이 부피만 있으면 시약 자체의 양으로 본다. 액체로 알려진 시약이 아니면 용액 부피일 수도 있어 알린다.
+      if (entry?.state !== "liquid") notes.push("시약 자체의 양으로 해석함 — 용액 전체 부피라면 농도를 입력해 주세요");
+      return done({ dim: "volume", value: d.vol.mL, basis });
+    }
     if (d.vol.type === "count") return done({ dim: "count", value: d.vol.n, unitLabel: d.vol.unitLabel, basis });
     const r = resolveMW(d, entry, mwMap);
     if (r.fail) return fail(r.fail, r.code);

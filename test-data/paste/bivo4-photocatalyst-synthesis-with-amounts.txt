@@ -1,0 +1,11 @@
+Synthesis of ZrO2/TaON. Ta2O5 powder was mixed with ZrO(NO3)2 in methanol, and the resulting mixture was dried and then calcined in air at 1073 K for 2 h to give a ZrO2/Ta2O5 composite. The composite was nitrided under flowing NH3 (20 mL min-1) at 1123 K for 15 h, yielding ZrO2/TaON with a Zr/Ta molar ratio of 0.15.
+
+Synthesis of BiVO4:Mo. Mo-doped BiVO4 (Mo/(Mo+V) = 0.04 mol%) was prepared by a hydrothermal method. Bi(NO3)3·5H2O (2.5 mmol, 1.213 g) was dissolved in 20 mL of 2 M HNO3, while NH4VO3 (2.5 mmol, 0.292 g) was dissolved in 20 mL of 2 M NaOH, and Na2MoO4 (0.2 mg) was added to the latter as the Mo source. The bismuth solution was added dropwise to the vanadate solution, which produced an orange precipitate. Ethylene glycol (10 mL) was then added to the mixture, and the pH was adjusted to 2.1 with aqueous NH3. After stirring for 0.5 h, the suspension was transferred to a 100 mL Teflon-lined stainless-steel autoclave and kept at 473 K for 24 h.
+
+NaOH etching of BiVO4:Mo. The as-prepared BiVO4:Mo powder (0.5 g) was dispersed in 50 mL of 0.01 M NaOH aqueous solution and stirred at room temperature for 6 min. The powder was then collected by filtration and dried, and is denoted BiVO4:Mo(NaOH).
+
+Photodeposition of RhCrOx on ZrO2/TaON. ZrO2/TaON powder (50 mg) was dispersed in 100 mL of 20 vol% aqueous methanol containing Na3RhCl6 and K2CrO4. After the air was removed under vacuum, the suspension was irradiated with a 300 W xenon lamp (no cut-off filter) for 6 h, and the powder was recovered by filtration.
+
+Photodeposition of Au and CoFeOx on BiVO4:Mo. BiVO4:Mo or BiVO4:Mo(NaOH) powder (50 mg) was dispersed in 100 mL of 25 mM phosphate buffer (pH 6) containing HAuCl4, CoSO4 and 0.5 mM K3[Fe(CN)6]. The system was evacuated and irradiated with a 300 W xenon lamp without a cut-off filter for 2 h. The solid was filtered off and dried naturally.
+
+Photodeposition of CoFeOx on BiVO4:Mo(NaOH). BiVO4:Mo(NaOH) powder (50 mg) was dispersed in 100 mL of 25 mM phosphate buffer (pH 6) containing CoSO4 (0.2 wt%), 0.8 mM K4[Fe(CN)6] and 20 mM NaIO3. After evacuation, the dispersion was irradiated with a 300 W xenon lamp without a cut-off filter for 2 h, and the powder was collected by filtration.

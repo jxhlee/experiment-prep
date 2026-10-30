@@ -1,19 +1,36 @@
 // 실제 Gemini 추출 → 분자량 조회 → 계산 → 합산 → 타임라인 전체 흐름을 테스트 데이터로 검증한다.
-// 사용법: (개발 서버를 켠 상태에서) npm run test:e2e [-- 고정자id]
+// 사용법: (개발 서버를 켠 상태에서) npm run test:e2e [-- 고정자id | samples | paste 파일명]
+//   BASE_URL=https://배포주소 npm run test:e2e -- samples   배포 서버로 돌리기
 //   test-data/fixtures.json        정답(손계산)이 있는 테스트 데이터
 //   test-data/*.txt                논문 Methods 텍스트를 넣어두면 정답 없이 결과만 출력
-import { readFileSync, readdirSync } from "node:fs";
+//   test-data/paste/*.txt          붙여넣기용 샘플 (인자 samples 로 전부 실행)
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { computeRow, canonicalKey, displayName, formatAmount, mergeResults, namesNeedingLookup } from "../src/lib/chem.mjs";
 import { buildTimeline, formatMinutes } from "../src/lib/timeline.mjs";
+import { buildRequestBody, classifyFailure, endpoint, parseExtraction } from "../src/lib/gemini.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const SIG = 4;
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "test-data");
 const only = process.argv[2];
 
+// E2E_MODEL=모델명 GEMINI_API_KEY=... 를 주면 서버 라우트를 거치지 않고 그 모델을 직접 호출해 비교한다.
+async function extractDirect(model, methodText) {
+  const t0 = Date.now();
+  const res = await fetch(endpoint(model), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    body: JSON.stringify(buildRequestBody(methodText)),
+    signal: AbortSignal.timeout(90000),
+  });
+  if (!res.ok) throw new Error(`${model}: HTTP ${res.status} (${classifyFailure(res.status, await res.text()).kind})`);
+  return { ...parseExtraction(await res.json()), ms: Date.now() - t0 };
+}
+
 async function extract(methodText) {
+  if (process.env.E2E_MODEL) return extractDirect(process.env.E2E_MODEL, methodText);
   for (let attempt = 1; attempt <= 3; attempt++) {
     const t0 = Date.now();
     const res = await fetch(`${BASE}/api/extract`, {
@@ -89,13 +106,22 @@ async function run({ id, title, methods, expect }) {
   }
 }
 
-const fixtures = JSON.parse(readFileSync(join(root, "fixtures.json"), "utf8"));
-const extras = readdirSync(root)
-  .filter((f) => f.endsWith(".txt"))
-  .map((f) => ({ id: f, title: "(정답 없는 사용자 샘플)", methods: readFileSync(join(root, f), "utf8") }));
+const readTxt = (dir, prefix = "") =>
+  existsSync(dir)
+    ? readdirSync(dir)
+        .filter((f) => f.endsWith(".txt"))
+        .map((f) => ({ id: `${prefix}${f}`, title: "(정답 없는 샘플)", methods: readFileSync(join(dir, f), "utf8") }))
+    : [];
 
-for (const f of [...fixtures, ...extras]) {
-  if (only && f.id !== only) continue;
+const fixtures = JSON.parse(readFileSync(join(root, "fixtures.json"), "utf8"));
+const extras = readTxt(root);
+const samples = readTxt(join(root, "paste"), "paste/");
+
+// 인자 없음: fixtures + test-data/*.txt / "samples": test-data/paste/*.txt 전부 / 그 외: id 하나
+const pool = only === "samples" ? samples : [...fixtures, ...extras, ...samples];
+for (const f of pool) {
+  if (only && only !== "samples" && f.id !== only && f.id !== `paste/${only}`) continue;
+  if (!only && f.id.startsWith("paste/")) continue;
   try {
     await run(f);
   } catch (err) {
