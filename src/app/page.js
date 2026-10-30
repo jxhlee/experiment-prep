@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { clearDraft, loadDraft, saveDraft, sessionStore } from "../lib/draft.mjs";
 import {
   computeRow,
   formatAmount,
@@ -24,7 +26,6 @@ import {
   saveUserReagents,
 } from "../lib/db.mjs";
 import AccountBar from "../components/AccountBar";
-import AuthPanel from "../components/AuthPanel";
 import ExperimentList from "../components/ExperimentList";
 import MwOverride from "../components/MwOverride";
 import SaveBar from "../components/SaveBar";
@@ -800,9 +801,10 @@ export default function Home() {
   const [sigFigs, setSigFigs] = useState(3);
   const [scaleFactor, setScaleFactor] = useState(1);
 
+  const router = useRouter();
   const auth = useAuth();
   const userId = auth.user?.id ?? null;
-  const [showAuth, setShowAuth] = useState(false);
+  const [restoredNotice, setRestoredNotice] = useState(false);
   const [showList, setShowList] = useState(false);
   const [saveTitle, setSaveTitle] = useState("");
   const [currentId, setCurrentId] = useState(null);
@@ -823,6 +825,47 @@ export default function Home() {
     };
   }, [userId]);
 
+  // 로그인은 별도 화면(/login)에서 한다. 하던 작업이 사라지지 않게 이동 직전에 보관하고, 돌아오면 복원한다.
+  function goToLogin() {
+    saveDraft(sessionStore(), {
+      step,
+      methodText,
+      scale,
+      customScale,
+      scaleFactor,
+      sigFigs,
+      saveTitle,
+      reagents,
+      timeline,
+      mwMap,
+      analysisMeta,
+    });
+    router.push("/login");
+  }
+
+  useEffect(() => {
+    const store = sessionStore();
+    const draft = loadDraft(store);
+    if (!draft) return;
+    Promise.resolve().then(() => {
+      setMethodText(draft.methodText);
+      setScale(draft.scale);
+      setCustomScale(draft.customScale);
+      nextRowId = Math.max(1, ...draft.reagents.map((r) => r.id));
+      setReagents(draft.reagents.length > 0 ? draft.reagents : [{ id: 1, name: "", concentration: "", volume: "" }]);
+      nextStepId = Math.max(0, ...draft.timeline.map((s) => s.id));
+      setTimeline(draft.timeline);
+      setSigFigs(draft.sigFigs);
+      setScaleFactor(draft.scaleFactor);
+      setSaveTitle(draft.saveTitle);
+      setMwMap(draft.mwMap);
+      setAnalysisMeta(draft.analysisMeta);
+      setStep(draft.step);
+      setRestoredNotice(true);
+      clearDraft(store);
+    });
+  }, []);
+
   async function loadList() {
     setExperiments((s) => ({ ...s, loading: true, error: "" }));
     try {
@@ -840,7 +883,7 @@ export default function Home() {
 
   async function handleSave(asNew = false) {
     if (!auth.user) {
-      setShowAuth(true);
+      goToLogin();
       return;
     }
     setSaveStatus({ kind: "saving" });
@@ -920,7 +963,7 @@ export default function Home() {
     currentId,
     status: saveStatus,
     onSave: handleSave,
-    onLogin: () => setShowAuth(true),
+    onLogin: goToLogin,
   };
 
   async function handleAnalyze({ force = false } = {}) {
@@ -1029,13 +1072,20 @@ export default function Home() {
           ready={auth.ready}
           user={auth.user}
           listOpen={showList}
-          onLogin={() => setShowAuth(true)}
+          onLogin={goToLogin}
           onToggleList={toggleList}
           onSignOut={handleSignOut}
         />
       )}
-      {auth.configured && showAuth && !auth.user && (
-        <AuthPanel onSignIn={auth.signIn} onSignUp={auth.signUp} onClose={() => setShowAuth(false)} />
+      {restoredNotice && (
+        <div className="mx-auto w-full max-w-4xl px-4 pb-2">
+          <div className="flex items-center justify-between gap-3 rounded-md bg-white px-3 py-2 text-xs text-slate-600 ring-1 ring-slate-200">
+            <span>하던 작업을 그대로 이어서 보여 드려요.</span>
+            <button onClick={() => setRestoredNotice(false)} className="font-semibold text-slate-700 underline">
+              닫기
+            </button>
+          </div>
+        </div>
       )}
       {auth.configured && showList && auth.user && (
         <ExperimentList

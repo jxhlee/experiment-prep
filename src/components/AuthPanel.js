@@ -5,7 +5,8 @@ import { authErrorMessage } from "../lib/db.mjs";
 
 const MIN_PASSWORD = 8;
 
-export default function AuthPanel({ onSignIn, onSignUp, onClose }) {
+// closeLabel 이 null 이면 닫기 버튼을 숨긴다 (별도 로그인 페이지에서 쓸 때)
+export default function AuthPanel({ onSignIn, onSignUp, onClose, closeLabel = "닫기" }) {
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,9 +47,11 @@ export default function AuthPanel({ onSignIn, onSignUp, onClose }) {
       <form onSubmit={submit} className="rounded-lg bg-slate-800 p-4 text-white">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-base font-bold">{isSignUp ? "회원가입" : "로그인"}</p>
-          <button type="button" onClick={onClose} className="text-sm text-slate-300 hover:text-white">
-            닫기
-          </button>
+          {closeLabel && (
+            <button type="button" onClick={onClose} className="text-sm text-slate-300 hover:text-white">
+              {closeLabel}
+            </button>
+          )}
         </div>
         <p className="mb-3 text-xs leading-relaxed text-slate-300">
           실험을 저장하고 다시 불러올 때만 필요해요. 로그인하지 않아도 분석과 계산은 모두 쓸 수 있어요.
