@@ -254,3 +254,22 @@ test("논문에 자주 나오는 무기 시약 표기는 내장 DB로 계산", (
   assert.ok(k4.notes.some((n) => n.includes("3수화물")));
   assert.equal(computeRow(row("HAuCl4", "1 mM", "10 mL")).ok, true);
 });
+
+test("직접 입력한 분자량은 내장 DB·PubChem·혼합 용액 판정보다 우선한다", () => {
+  const user = (key, mw) => ({ [key]: { mw, source: "user" } });
+  const nacl = computeRow(row("NaCl", "1 M", "1 L"), { mwMap: user("nacl", 60) });
+  close(nacl.value, 60);
+  assert.equal(nacl.mwSource, "직접 입력");
+
+  // PubChem 조회값이 있어도 직접 입력이 이긴다 / 출처 표시는 PubChem
+  const both = computeRow(row("sodium pyruvate", "1 mM", "10 mL"), { mwMap: { sodiumpyruvate: { mw: 110.04, source: "pubchem" } } });
+  assert.equal(both.mwSource, "PubChem");
+  close(computeRow(row("sodium pyruvate", "1 mM", "10 mL"), { mwMap: user("sodiumpyruvate", 100) }).value, 0.001);
+
+  // 혼합 용액으로 막혀 있던 이름도, 사용자가 분자량을 알려 주면 계산한다
+  assert.equal(computeRow(row("phosphate buffer", "25 mM", "100 mL")).code, "mixture");
+  close(computeRow(row("phosphate buffer", "25 mM", "100 mL"), { mwMap: user("phosphate", 120) }).value, 0.025 * 0.1 * 120);
+
+  // 조회 실패 사유에는 구분용 code 가 붙는다
+  assert.equal(computeRow(row("zzz", "1 mM", "1 mL"), { mwMap: { zzz: { notFound: true } } }).code, "not-found");
+});

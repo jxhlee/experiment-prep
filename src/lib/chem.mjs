@@ -235,10 +235,12 @@ function fail(reason, code) {
 }
 
 function resolveMW(d, entry, mwMap) {
+  const hit = d.key ? mwMap[d.key] : undefined;
+  // 사용자가 직접 입력한 분자량이 내장 DB·PubChem보다 우선한다
+  if (hit?.mw && hit.source === "user") return { mw: hit.mw, source: "직접 입력", note: "직접 입력한 분자량을 사용함" };
   if (entry) return { mw: entry.mw, source: "내장 DB", note: entry.note };
-  if (MIXTURE_KEYS.has(d.key)) return { fail: "혼합 용액이라 분자량으로 계산할 수 없음 — 구성 성분별로 입력해 주세요" };
+  if (MIXTURE_KEYS.has(d.key)) return { fail: "혼합 용액이라 분자량으로 계산할 수 없음 — 구성 성분별로 입력해 주세요", code: "mixture" };
   if (!d.key) return { fail: "분자량을 찾을 수 없음 — 영문 화학명으로 입력해 주세요", code: "no-key" };
-  const hit = mwMap[d.key];
   if (hit?.mw) {
     const formula = hit.formula ? ` (${hit.formula})` : "";
     return { mw: hit.mw, source: "PubChem", note: `분자량을 PubChem에서 조회함${formula} — 맞는 물질인지 확인하세요` };

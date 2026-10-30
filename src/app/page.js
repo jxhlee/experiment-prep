@@ -1,7 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { computeRow, formatAmount, mergeResults, namesNeedingLookup, scaleResult } from "../lib/chem.mjs";
+import { useEffect, useMemo, useState } from "react";
+import {
+  computeRow,
+  formatAmount,
+  mergeResults,
+  namesNeedingLookup,
+  normalizeName,
+  scaleResult,
+} from "../lib/chem.mjs";
+import { useAuth } from "../lib/use-auth";
+import { getSupabase } from "../lib/supabase";
+import { defaultTitle, fromRecord, toRecord } from "../lib/experiments.mjs";
+import {
+  deleteExperiment,
+  friendlyDbError,
+  libraryToMwMap,
+  listExperiments,
+  listUserReagents,
+  loadExperiment,
+  mergeLibrary,
+  saveExperiment,
+  saveUserReagents,
+} from "../lib/db.mjs";
+import AccountBar from "../components/AccountBar";
+import AuthPanel from "../components/AuthPanel";
+import ExperimentList from "../components/ExperimentList";
+import MwOverride from "../components/MwOverride";
+import SaveBar from "../components/SaveBar";
 import { buildNarrative, buildTimeline, formatMinutes, formatStart } from "../lib/timeline.mjs";
 import { ExtractError, MAX_CHARS_OWN_KEY, MAX_CHARS_SERVER } from "../lib/gemini.mjs";
 import {
@@ -227,6 +253,7 @@ function StepTwoReview({
   analyzeError,
   isAnalyzing,
   onReanalyze,
+  save,
 }) {
   const updateRow = (id, field, value) => {
     setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -449,6 +476,8 @@ function StepTwoReview({
             {isCalculating ? "계산 중..." : "계산하기"}
           </button>
 
+          {save.configured && <SaveBar save={save} />}
+
           <button
             onClick={onBack}
             className="rounded-lg border border-slate-300 py-2 text-sm text-slate-500 hover:bg-slate-50"
@@ -470,6 +499,8 @@ function StepThreeResult({
   scaleFactor,
   setScaleFactor,
   onBack,
+  save,
+  onSetMw,
 }) {
   const [timelineMode, setTimelineMode] = useState("scroll");
   const [timelineIndex, setTimelineIndex] = useState(0);
@@ -557,9 +588,17 @@ function StepThreeResult({
                                   ※ {n}
                                 </span>
                               ))}
+                              {(r.res.mwSource === "PubChem" || r.res.mwSource === "직접 입력") && (
+                                <MwOverride editing loggedIn={Boolean(save.user)} onApply={(mw) => onSetMw(r.name, mw)} />
+                              )}
                             </>
                           ) : (
-                            <span className="text-sm text-red-700">⚠ {r.res.reason}</span>
+                            <>
+                              <span className="text-sm text-red-700">⚠ {r.res.reason}</span>
+                              {r.res.code === "not-found" && (
+                                <MwOverride loggedIn={Boolean(save.user)} onApply={(mw) => onSetMw(r.name, mw)} />
+                              )}
+                            </>
                           )}
                         </td>
                       </tr>
@@ -726,6 +765,12 @@ function StepThreeResult({
         </div>
       </div>
 
+      {save.configured && (
+        <div className="mt-4">
+          <SaveBar save={save} />
+        </div>
+      )}
+
       <button
         onClick={onBack}
         className="mt-4 rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-500 hover:bg-slate-50"
@@ -754,6 +799,129 @@ export default function Home() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [sigFigs, setSigFigs] = useState(3);
   const [scaleFactor, setScaleFactor] = useState(1);
+
+  const auth = useAuth();
+  const userId = auth.user?.id ?? null;
+  const [showAuth, setShowAuth] = useState(false);
+  const [showList, setShowList] = useState(false);
+  const [saveTitle, setSaveTitle] = useState("");
+  const [currentId, setCurrentId] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(null);
+  const [experiments, setExperiments] = useState({ items: [], loading: false, error: "" });
+
+  // 로그인하면 내 시약 목록(저장해 둔 분자량)을 불러와, 이후 계산에서 PubChem 조회 없이 재사용한다
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    listUserReagents(getSupabase())
+      .then((rows) => {
+        if (active) setMwMap((prev) => mergeLibrary(prev, libraryToMwMap(rows)));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  async function loadList() {
+    setExperiments((s) => ({ ...s, loading: true, error: "" }));
+    try {
+      setExperiments({ items: await listExperiments(getSupabase()), loading: false, error: "" });
+    } catch (err) {
+      setExperiments({ items: [], loading: false, error: friendlyDbError(err) });
+    }
+  }
+
+  function toggleList() {
+    const next = !showList;
+    setShowList(next);
+    if (next) loadList();
+  }
+
+  async function handleSave(asNew = false) {
+    if (!auth.user) {
+      setShowAuth(true);
+      return;
+    }
+    setSaveStatus({ kind: "saving" });
+    try {
+      const title = saveTitle.trim() || defaultTitle();
+      const record = toRecord({ title, methodText, reagents, steps: timeline, scaleFactor, sigFigs, mwMap });
+      const saved = await saveExperiment(getSupabase(), auth.user.id, record, asNew ? null : currentId);
+      setCurrentId(saved.id);
+      setSaveTitle(title);
+      const time = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+      setSaveStatus({ kind: "saved", message: `저장했어요 · ${time}` });
+      if (showList) loadList();
+    } catch (err) {
+      setSaveStatus({ kind: "error", message: friendlyDbError(err) });
+    }
+  }
+
+  async function handleOpenExperiment(id) {
+    setExperiments((s) => ({ ...s, error: "" }));
+    try {
+      const exp = fromRecord(await loadExperiment(getSupabase(), id));
+      setMethodText(exp.methodText);
+      nextRowId = Math.max(1, exp.reagents.length);
+      setReagents(exp.reagents.length > 0 ? exp.reagents : [{ id: 1, name: "", concentration: "", volume: "" }]);
+      nextStepId = exp.steps.length;
+      setTimeline(exp.steps);
+      setScaleFactor(exp.scaleFactor);
+      setSigFigs(exp.sigFigs);
+      setSaveTitle(exp.title);
+      setCurrentId(exp.id);
+      setSaveStatus(null);
+      setAnalysisMeta(null);
+      setAnalyzeError(null);
+      setShowList(false);
+      await goToResults(exp.reagents);
+    } catch (err) {
+      setExperiments((s) => ({ ...s, error: friendlyDbError(err) }));
+    }
+  }
+
+  async function handleDeleteExperiment(id) {
+    try {
+      await deleteExperiment(getSupabase(), id);
+      if (id === currentId) setCurrentId(null);
+      await loadList();
+    } catch (err) {
+      setExperiments((s) => ({ ...s, error: friendlyDbError(err) }));
+    }
+  }
+
+  async function handleSignOut() {
+    try {
+      await auth.signOut();
+    } catch {}
+    setMwMap({});
+    setExperiments({ items: [], loading: false, error: "" });
+    setCurrentId(null);
+    setSaveStatus(null);
+    setShowList(false);
+  }
+
+  // 사용자가 분자량을 직접 입력한다. 로그인 상태면 내 시약 목록에도 저장한다.
+  function handleSetMw(name, mw) {
+    const { key, clean } = normalizeName(name);
+    if (!key) return;
+    setMwMap((prev) => ({ ...prev, [key]: { mw, source: "user" } }));
+    if (userId) {
+      saveUserReagents(getSupabase(), userId, [{ key, name: clean || name, mw, source: "user" }], { overwrite: true }).catch(() => {});
+    }
+  }
+
+  const save = {
+    configured: auth.configured,
+    user: auth.user,
+    title: saveTitle,
+    setTitle: setSaveTitle,
+    currentId,
+    status: saveStatus,
+    onSave: handleSave,
+    onLogin: () => setShowAuth(true),
+  };
 
   async function handleAnalyze({ force = false } = {}) {
     setIsAnalyzing(true);
@@ -807,6 +975,12 @@ export default function Home() {
 
       setAnalysisMeta({ fromCache, model: data.model || "" });
       setScaleFactor(customScale ? Number(customScale) : scale ?? 1);
+      if (!force) {
+        // 새로 분석하면 새 실험이다. 불러왔던 실험을 덮어쓰지 않도록 연결을 끊는다.
+        setCurrentId(null);
+        setSaveStatus(null);
+        setSaveTitle("");
+      }
       setStep(2);
     } catch (err) {
       setAnalyzeError({ message: err.message || "분석 중 오류가 발생했습니다.", kind: err.kind });
@@ -815,23 +989,30 @@ export default function Home() {
     }
   }
 
-  async function handleCalculate() {
+  // 분자량이 필요한 시약만 조회해(내 시약 목록에 있으면 조회하지 않는다) 결과 화면으로 간다
+  async function goToResults(list) {
     setIsCalculating(true);
     try {
-      const targets = namesNeedingLookup(reagents, mwMap);
+      const targets = namesNeedingLookup(list, mwMap);
       if (targets.length > 0) {
         const found = await Promise.all(
           targets.map(async ({ key, name }) => {
             try {
               const res = await fetch(`/api/mw?name=${encodeURIComponent(name)}`);
               const data = await res.json();
-              return [key, res.ok ? { mw: data.mw, formula: data.formula } : { notFound: true }];
+              return { key, name, entry: res.ok ? { mw: data.mw, formula: data.formula, source: "pubchem" } : { notFound: true } };
             } catch {
-              return [key, { notFound: true }];
+              return { key, name, entry: { notFound: true } };
             }
           }),
         );
-        setMwMap((prev) => ({ ...prev, ...Object.fromEntries(found) }));
+        setMwMap((prev) => ({ ...prev, ...Object.fromEntries(found.map((f) => [f.key, f.entry])) }));
+        if (userId) {
+          const hits = found
+            .filter((f) => f.entry.mw)
+            .map((f) => ({ key: f.key, name: f.name, mw: f.entry.mw, formula: f.entry.formula, source: "pubchem" }));
+          saveUserReagents(getSupabase(), userId, hits).catch(() => {});
+        }
       }
       setStep(3);
     } finally {
@@ -839,8 +1020,35 @@ export default function Home() {
     }
   }
 
+  const handleCalculate = () => goToResults(reagents);
+
   return (
     <div className="flex flex-1 flex-col bg-zinc-50 py-10">
+      {auth.configured && (
+        <AccountBar
+          ready={auth.ready}
+          user={auth.user}
+          listOpen={showList}
+          onLogin={() => setShowAuth(true)}
+          onToggleList={toggleList}
+          onSignOut={handleSignOut}
+        />
+      )}
+      {auth.configured && showAuth && !auth.user && (
+        <AuthPanel onSignIn={auth.signIn} onSignUp={auth.signUp} onClose={() => setShowAuth(false)} />
+      )}
+      {auth.configured && showList && auth.user && (
+        <ExperimentList
+          items={experiments.items}
+          loading={experiments.loading}
+          error={experiments.error}
+          currentId={currentId}
+          onOpen={handleOpenExperiment}
+          onDelete={handleDeleteExperiment}
+          onClose={() => setShowList(false)}
+        />
+      )}
+
       <StepIndicator step={step} onJump={setStep} />
 
       {step === 1 && (
@@ -876,6 +1084,7 @@ export default function Home() {
           analyzeError={analyzeError}
           isAnalyzing={isAnalyzing}
           onReanalyze={() => handleAnalyze({ force: true })}
+          save={save}
         />
       )}
 
@@ -889,6 +1098,8 @@ export default function Home() {
           scaleFactor={scaleFactor}
           setScaleFactor={setScaleFactor}
           onBack={() => setStep(2)}
+          save={save}
+          onSetMw={handleSetMw}
         />
       )}
     </div>
