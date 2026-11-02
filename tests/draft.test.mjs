@@ -9,6 +9,8 @@ const fakeStorage = () => {
 
 const sample = {
   step: 2,
+  reached: 3,
+  currentId: "7f0c1d2e-0000-4000-8000-000000000001",
   methodText: "Cells were lysed in 50 mM Tris-HCl.",
   scale: 2,
   customScale: "",
@@ -71,6 +73,8 @@ test("복원할 때 값을 다듬는다 (이상한 값이 화면 상태로 새�
   });
   const d = loadDraft(s);
   assert.equal(d.step, 1);
+  assert.equal(d.reached, 1);
+  assert.equal(d.currentId, null);
   assert.equal(d.methodText.length, 60000);
   assert.equal(d.scale, null);
   assert.equal(d.scaleFactor, 1);

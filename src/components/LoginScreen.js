@@ -4,45 +4,55 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthPanel from "./AuthPanel";
-import { useAuth } from "../lib/use-auth";
+import { useAccount } from "./AuthProvider";
+import { Icon } from "./icons";
+import { BrandLink } from "./shell/Navigation";
+import { Alert, Card, buttonClass } from "./ui";
+
+// 로그인하러 오기 전에 있던 화면으로 돌아간다. 같은 사이트 안의 주소만 받는다.
+function returnPath() {
+  const next = new URLSearchParams(window.location.search).get("next");
+  return typeof next === "string" && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+}
 
 export default function LoginScreen() {
   const router = useRouter();
-  const auth = useAuth();
+  const auth = useAccount();
 
-  // 로그인이 끝나면(또는 이미 로그인돼 있으면) 실제 화면으로 넘어간다
+  // 로그인이 끝나면(또는 이미 로그인돼 있으면) 원래 화면으로 넘어간다
   useEffect(() => {
-    if (auth.ready && auth.user) router.replace("/");
+    if (auth.ready && auth.user) router.replace(returnPath());
   }, [auth.ready, auth.user, router]);
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-4 py-12">
-      <h1 className="text-center text-2xl font-bold text-slate-800">실험 프렙 (가제)</h1>
-      <p className="mt-2 max-w-sm text-center text-sm text-slate-500">
-        논문의 실험 방법을 읽고, 시약 계량값과 실행 순서를 계산해 드려요.
-      </p>
+    <main id="main" tabIndex={-1} className="flex min-h-screen flex-col items-center justify-center px-4 py-10 focus:outline-none">
+      <BrandLink />
+      <div className="mt-8 w-full max-w-sm">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">로그인하고 실험 저장하기</h1>
+        <p className="mt-1 text-sm text-ink-muted">저장하고 다시 불러오고 싶을 때만 필요해요. 로그인하지 않아도 분석과 계산은 모두 쓸 수 있어요.</p>
 
-      <div className="mt-6 w-full max-w-md">
-        {!auth.configured ? (
-          <div className="rounded-lg bg-slate-800 p-4 text-sm text-white">
-            <p className="font-semibold">로그인 기능이 아직 설정되지 않았어요.</p>
-            <p className="mt-1 text-slate-300">저장 없이 분석과 계산은 그대로 쓸 수 있어요.</p>
-          </div>
-        ) : !auth.ready || auth.user ? (
-          <p className="text-center text-sm text-slate-500">확인 중…</p>
-        ) : (
-          <AuthPanel
-            onSignIn={auth.signIn}
-            onSignUp={auth.signUp}
-            onClose={() => router.replace("/")}
-            closeLabel={null}
-          />
-        )}
+        <Card className="mt-6">
+          {!auth.configured ? (
+            <Alert kind="warn">
+              <p className="font-medium">로그인 기능이 아직 설정되지 않았어요.</p>
+              <p className="mt-0.5">저장 없이 분석과 계산은 그대로 쓸 수 있어요.</p>
+            </Alert>
+          ) : !auth.ready || auth.user ? (
+            <p role="status" className="text-sm text-ink-muted">
+              확인 중…
+            </p>
+          ) : (
+            <AuthPanel onSignIn={auth.signIn} onSignUp={auth.signUp} onDone={() => router.replace(returnPath())} />
+          )}
+        </Card>
+
+        <p className="mt-4 text-center">
+          <Link href="/" className={buttonClass({ variant: "ghost" })}>
+            <Icon name="arrowLeft" size={16} />
+            {auth.configured ? "로그인 없이 사용하기" : "처음 화면으로"}
+          </Link>
+        </p>
       </div>
-
-      <Link href="/" className="mt-6 text-sm text-slate-600 underline hover:text-slate-800">
-        {auth.configured ? "로그인 없이 사용하기 →" : "분석 화면으로 가기 →"}
-      </Link>
     </main>
   );
 }

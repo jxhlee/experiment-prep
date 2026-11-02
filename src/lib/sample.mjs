@@ -1,0 +1,4 @@
+// "예시 넣어 보기" 버튼에 쓰는 짧은 Methods 문단 (test-data/paste 의 광촉매 합성 예시 중 일부).
+export const SAMPLE_METHODS = `Synthesis of BiVO4:Mo. Mo-doped BiVO4 (Mo/(Mo+V) = 0.04 mol%) was prepared by a hydrothermal method. Bi(NO3)3·5H2O (2.5 mmol, 1.213 g) was dissolved in 20 mL of 2 M HNO3, while NH4VO3 (2.5 mmol, 0.292 g) was dissolved in 20 mL of 2 M NaOH, and Na2MoO4 (0.2 mg) was added to the latter as the Mo source. The bismuth solution was added dropwise to the vanadate solution, which produced an orange precipitate. Ethylene glycol (10 mL) was then added to the mixture, and the pH was adjusted to 2.1 with aqueous NH3. After stirring for 0.5 h, the suspension was transferred to a 100 mL Teflon-lined stainless-steel autoclave and kept at 473 K for 24 h.
+
+NaOH etching of BiVO4:Mo. The as-prepared BiVO4:Mo powder (0.5 g) was dispersed in 50 mL of 0.01 M NaOH aqueous solution and stirred at room temperature for 6 min. The powder was then collected by filtration and dried.`;

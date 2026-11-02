@@ -28,8 +28,12 @@ function cleanMwMap(map) {
 }
 
 function clean(d) {
+  const step = [1, 2, 3].includes(d.step) ? d.step : 1;
   return {
-    step: [1, 2, 3].includes(d.step) ? d.step : 1,
+    step,
+    // 가 본 가장 먼 단계(진행 표시줄에서 다시 눌러 갈 수 있는 곳)와, 저장해 둔 실험에서 이어 하는 중이면 그 id
+    reached: [1, 2, 3].includes(d.reached) ? d.reached : step,
+    currentId: typeof d.currentId === "string" && d.currentId ? d.currentId.slice(0, 64) : null,
     methodText: str(d.methodText, 60000),
     scale: Number.isFinite(d.scale) ? d.scale : null,
     customScale: str(d.customScale, 20),
