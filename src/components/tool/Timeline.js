@@ -4,6 +4,7 @@ import { useState } from "react";
 import { formatMinutes, formatStart } from "../../lib/timeline.mjs";
 import { Icon } from "../icons";
 import { Alert, Badge, Button, CardTitle, Segmented } from "../ui";
+import { SourceBadge } from "./Provenance";
 
 function describeDuration(item) {
   if (item.totalMin == null) return "시간 미정";
@@ -11,7 +12,7 @@ function describeDuration(item) {
   return `${item.approx ? "약 " : ""}${formatMinutes(item.totalMin)}${rep}`;
 }
 
-function StepCard({ step, index, large = false }) {
+function StepCard({ step, index, large = false, prov = null }) {
   return (
     <div className={`flex h-full flex-col gap-1 rounded-xl border border-line bg-surface p-4 ${large ? "items-center text-center" : ""}`}>
       <span aria-hidden="true" className="flex h-7 w-7 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-ink">
@@ -25,6 +26,13 @@ function StepCard({ step, index, large = false }) {
       </p>
       <p className="text-sm text-ink-muted">{formatStart(step)}</p>
       {step.details && <p className="text-sm text-ink">{step.details}</p>}
+      {prov && (
+        <div className={`mt-1 flex flex-wrap gap-1.5 ${large ? "justify-center" : ""}`}>
+          <SourceBadge src={prov.duration} field="시간" />
+          <SourceBadge src={prov.details} field="조건" />
+          <SourceBadge src={prov.repeat} field="반복" />
+        </div>
+      )}
       {step.isWaiting && (
         <p className="mt-auto pt-2">
           <Badge tone="warn" icon="hourglass">
@@ -36,7 +44,7 @@ function StepCard({ step, index, large = false }) {
   );
 }
 
-export default function Timeline({ tl }) {
+export default function Timeline({ tl, prov = {} }) {
   const [mode, setMode] = useState("scroll");
   const [index, setIndex] = useState(0);
 
@@ -74,6 +82,12 @@ export default function Timeline({ tl }) {
         />
       </div>
 
+      {Object.keys(prov).length > 0 && (
+        <p className="mt-3 text-sm text-ink-muted">
+          시간·조건 옆 표시는 논문 원문과 맞춰 본 결과예요. 단계 이름은 AI가 한국어로 요약한 말이에요.
+        </p>
+      )}
+
       {tl.items.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-line-strong p-6 text-center text-sm text-ink-muted">
           표시할 타임라인이 없어요. 이전 단계에서 실행 단계를 추가해 주세요.
@@ -88,7 +102,7 @@ export default function Timeline({ tl }) {
           <ol className="flex w-max gap-3">
             {tl.items.map((step, i) => (
               <li key={step.id ?? i} className="w-52 shrink-0">
-                <StepCard step={step} index={i} />
+                <StepCard step={step} index={i} prov={prov[step.id]} />
               </li>
             ))}
           </ol>
@@ -112,7 +126,7 @@ export default function Timeline({ tl }) {
               aria-live="polite"
               className="min-w-0 flex-1"
             >
-              <StepCard step={current} index={safeIndex} large />
+              <StepCard step={current} index={safeIndex} large prov={prov[current.id]} />
             </div>
             <Button
               variant="secondary"

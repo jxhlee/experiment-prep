@@ -95,6 +95,9 @@ const DB_ENTRIES = [
   { display: "NH4OH", names: ["NH4OH", "NH3·H2O", "ammonium hydroxide", "ammonia solution", "ammonia water", "aqueous ammonia", "ammonia"], mw: 35.05, needsStock: true },
 ];
 
+/** 내장 DB 에 있는 시약의 표시 이름 (다른 모듈·테스트가 모든 내장 시약을 훑어볼 때 쓴다) */
+export const DB_DISPLAY_NAMES = DB_ENTRIES.map((e) => e.display);
+
 // 분자량 하나로 정의할 수 없는 혼합 용액·배지 이름. 인산·시트르산·붕산 완충액은
 // 염의 종류와 비율에 따라 달라져서, PubChem이 돌려주는 이온 하나의 분자량을 쓰면 틀린 값이 나온다.
 const MIXTURE_KEYS = new Set([
@@ -119,6 +122,11 @@ for (const entry of DB_ENTRIES) {
   for (const alias of entry.names) {
     INDEX.set(normalizeName(alias).key, entry);
   }
+}
+
+/** 분자량 하나로 정의할 수 없는 혼합 용액·배지 이름인가 (PBS, LB, 인산 완충액 등) */
+export function isMixtureName(name) {
+  return MIXTURE_KEYS.has(normalizeName(name).key);
 }
 
 export function findEntry(name) {
@@ -237,7 +245,11 @@ function fail(reason, code) {
 function resolveMW(d, entry, mwMap) {
   const hit = d.key ? mwMap[d.key] : undefined;
   // 사용자가 직접 입력한 분자량이 내장 DB·PubChem보다 우선한다
-  if (hit?.mw && hit.source === "user") return { mw: hit.mw, source: "직접 입력", note: "직접 입력한 분자량을 사용함" };
+  if (hit?.mw && hit.source === "user") {
+    // 수화물·염 형태를 골라서 정한 값이면 formula 에 그 형태의 화학식이 들어 있다
+    if (hit.formula) return { mw: hit.mw, source: "형태 선택", note: `선택한 형태(${hit.formula})의 분자량을 사용함` };
+    return { mw: hit.mw, source: "직접 입력", note: "직접 입력한 분자량을 사용함" };
+  }
   if (entry) return { mw: entry.mw, source: "내장 DB", note: entry.note };
   if (MIXTURE_KEYS.has(d.key)) return { fail: "혼합 용액이라 분자량으로 계산할 수 없음 — 구성 성분별로 입력해 주세요", code: "mixture" };
   if (!d.key) return { fail: "분자량을 찾을 수 없음 — 영문 화학명으로 입력해 주세요", code: "no-key" };

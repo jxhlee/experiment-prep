@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { clearDraft, loadDraft, saveDraft, sessionStore } from "../lib/draft.mjs";
-import { namesNeedingLookup, normalizeName } from "../lib/chem.mjs";
+import { findEntry, isMixtureName, namesNeedingLookup, normalizeName } from "../lib/chem.mjs";
 import { getSupabase } from "../lib/supabase";
 import { defaultTitle, fromRecord, toRecord } from "../lib/experiments.mjs";
 import {
@@ -63,12 +63,17 @@ export function ExperimentProvider({ children }) {
   const [experiments, setExperiments] = useState(EMPTY_LIST);
   const [liveMessage, setLiveMessage] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  // 시약마다 PubChem 에서 확인한 결과(이름 키로 보관)와, 다른 형태(수화물) 후보를 찾은 결과
+  const [reagentInfo, setReagentInfo] = useState({});
+  const [formProbe, setFormProbe] = useState({});
 
   const rowIdRef = useRef(1);
   const stepIdRef = useRef(0);
   const libraryRef = useRef({});
   const lookupRef = useRef(null);
   const latest = useRef({});
+  const infoRef = useRef({});
+  const probeRef = useRef({});
 
   // 동작들이 항상 최신 값을 읽도록 매 렌더 뒤에 갱신한다 (동작 함수는 모양이 바뀌지 않게 둔다)
   useEffect(() => {
@@ -276,16 +281,89 @@ export function ExperimentProvider({ children }) {
   }, [notify]);
 
   /** 사용자가 분자량을 직접 입력한다. 로그인 상태면 내 시약 목록에도 저장한다. */
-  const setMw = useCallback((name, mw) => {
+  const setMw = useCallback((name, mw, form = "") => {
     const { key, clean } = normalizeName(name);
     if (!key) return Promise.resolve();
-    setMwMap((prev) => ({ ...prev, [key]: { mw, source: "user" } }));
-    notify(`${clean || name}의 분자량을 ${mw} g/mol로 적용했어요.`);
+    // 수화물·염 형태를 골랐다면 그 형태의 화학식을 formula 에 함께 보관한다
+    const entry = form ? { mw, source: "user", formula: form } : { mw, source: "user" };
+    setMwMap((prev) => ({ ...prev, [key]: entry }));
+    notify(form ? `${clean || name}을(를) ${form} 형태(분자량 ${mw})로 바꿨어요.` : `${clean || name}의 분자량을 ${mw} g/mol로 적용했어요.`);
     const uid = latest.current.userId;
     if (!uid) return Promise.resolve();
-    libraryRef.current = { ...libraryRef.current, [key]: { mw, source: "user" } };
-    return saveUserReagents(getSupabase(), uid, [{ key, name: clean || name, mw, source: "user" }], { overwrite: true }).catch(() => {});
+    libraryRef.current = { ...libraryRef.current, [key]: entry };
+    return saveUserReagents(getSupabase(), uid, [{ key, name: clean || name, mw, formula: form || undefined, source: "user" }], { overwrite: true }).catch(() => {});
   }, [notify]);
+
+
+  const patchInfo = useCallback((key, patch) => {
+    infoRef.current = { ...infoRef.current, [key]: { ...infoRef.current[key], ...patch } };
+    setReagentInfo(infoRef.current);
+  }, []);
+
+  /**
+   * 입력한 시약이 실제로 있는 물질인지 PubChem 에서 확인한다. ghs=true 면 유해성(GHS) 정보까지 가져온다.
+   * 내장 시약·혼합 용액은 이름만으로 판단하므로 ghs 가 필요할 때만 조회한다. 이미 확인한 것은 다시 묻지 않는다.
+   */
+  const checkReagents = useCallback(async ({ ghs = false } = {}) => {
+    const seen = new Set();
+    const targets = [];
+    for (const r of latest.current.reagents) {
+      const { key, clean } = normalizeName(r.name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      if (!ghs && (findEntry(r.name) || isMixtureName(r.name))) continue;
+      const info = infoRef.current[key];
+      const done = info && (info.state === "notfound" || (info.state === "found" && (!ghs || info.ghsState === "done")));
+      if (!done && info?.state !== "checking") targets.push({ key, name: clean });
+    }
+    if (targets.length === 0) return;
+    for (const t of targets) patchInfo(t.key, { state: "checking" });
+
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const { key, name } = queue.shift();
+        try {
+          const res = await fetch(`/api/reagent?name=${encodeURIComponent(name)}${ghs ? "&ghs=1" : ""}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || "확인하지 못했어요");
+          if (!data.found) patchInfo(key, { state: "notfound" });
+          else {
+            patchInfo(key, {
+              state: "found",
+              cid: data.cid,
+              title: data.title,
+              formula: data.formula,
+              mw: data.mw,
+              ...(ghs ? { ghs: data.ghs ?? null, ghsState: data.ghsError ? "error" : "done" } : {}),
+            });
+          }
+        } catch (err) {
+          patchInfo(key, { state: "error", error: err.message });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+  }, [patchInfo]);
+
+  /** 목록에 없는 시약의 다른 형태(무수물·수화물)를 PubChem 에서 찾는다 */
+  const probeForms = useCallback(async (name) => {
+    const { key, clean } = normalizeName(name);
+    if (!key || probeRef.current[key]?.state === "loading") return;
+    const set = (v) => {
+      probeRef.current = { ...probeRef.current, [key]: v };
+      setFormProbe(probeRef.current);
+    };
+    set({ state: "loading", forms: [] });
+    try {
+      const res = await fetch(`/api/forms?name=${encodeURIComponent(clean)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "찾지 못했어요");
+      set({ state: "done", forms: data.forms ?? [] });
+    } catch (err) {
+      set({ state: "error", forms: [], error: err.message });
+    }
+  }, []);
 
   const loadExperiments = useCallback(async () => {
     setExperiments((s) => ({ ...s, loading: true, error: "" }));
@@ -390,6 +468,8 @@ export function ExperimentProvider({ children }) {
     analyze, isAnalyzing, analyzeError,
     prepareResults, isCalculating,
     setMw,
+    reagentInfo, checkReagents,
+    formProbe, probeForms,
     resetWork,
     // 저장
     saveTitle, setSaveTitle, currentId, saveStatus, save,

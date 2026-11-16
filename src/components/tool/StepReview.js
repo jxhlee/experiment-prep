@@ -1,13 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { normalizeName } from "../../lib/chem.mjs";
+import { analyzeReagent, analyzeStep, countSources } from "../../lib/provenance.mjs";
+import { summarizeExistence } from "../../lib/reagent-status.mjs";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
 import SaveCard from "../SaveCard";
 import { Alert, Badge, Button, Card, CardTitle, PageHeader, TabPanel, Tabs, buttonClass, inputClass } from "../ui";
 import { focusSoon } from "./focus";
+import { AiOnlyBadge, EvidenceDetails, ExistenceChip, ReagentSources, SourceBadge } from "./Provenance";
 import Stepper from "./Stepper";
 
 const REAGENT_COLS = "md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_auto] md:items-end md:gap-3";
@@ -20,8 +24,18 @@ export default function StepReview() {
     reagents, setReagents, timeline, setTimeline, newRowId, newStepId,
     analysisMeta, analyzeError, isAnalyzing, analyze,
     prepareResults, isCalculating, markReached, notify,
+    methodText, reagentInfo, checkReagents,
   } = useExperiment();
   const [tab, setTab] = useState("reagents");
+
+  // 값이 논문 원문에 적혀 있는지 대조한 결과 (원문이 없으면 null)
+  const rowAnalysis = useMemo(() => reagents.map((r) => analyzeReagent(r, methodText)), [reagents, methodText]);
+  const stepAnalysis = useMemo(() => timeline.map((st) => analyzeStep(st, methodText)), [timeline, methodText]);
+  const counts = countSources([...rowAnalysis, ...stepAnalysis]);
+  const hasText = methodText.trim() !== "";
+  const keyOf = (n) => normalizeName(n).key;
+  const existence = summarizeExistence(reagents.map((r) => r.name), reagentInfo, keyOf);
+  const checking = reagents.some((r) => reagentInfo[keyOf(r.name)]?.state === "checking");
 
   useEffect(() => {
     markReached(2);
@@ -148,6 +162,15 @@ export default function StepReview() {
                         삭제
                       </Button>
                     </div>
+                    {row.name.trim() && (
+                      <div className="col-span-2 flex flex-col gap-1.5 md:col-span-4">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                          <ReagentSources analysis={rowAnalysis[i]} />
+                          <ExistenceChip name={row.name} info={reagentInfo[keyOf(row.name)]} />
+                        </div>
+                        {rowAnalysis[i] && <EvidenceDetails evidence={rowAnalysis[i].evidence} />}
+                      </div>
+                    )}
                   </fieldset>
                 </li>
               ))}
@@ -223,6 +246,17 @@ export default function StepReview() {
                         />
                       </div>
                     </div>
+                    {stepAnalysis[i] && (
+                      <div className="mt-2.5 flex flex-col gap-1.5">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                          <AiOnlyBadge field="단계 이름·대기 여부" />
+                          <SourceBadge src={stepAnalysis[i].duration} field="시간" />
+                          <SourceBadge src={stepAnalysis[i].repeat} field="반복" />
+                          <SourceBadge src={stepAnalysis[i].details} field="조건" />
+                        </div>
+                        <EvidenceDetails evidence={stepAnalysis[i].evidence} missing="이 시간이 적힌 문장을 원문에서 찾지 못했어요. 원문과 직접 대조해 주세요." />
+                      </div>
+                    )}
                     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
                       <label className="flex min-h-10 cursor-pointer items-center gap-2.5 text-sm text-ink pointer-coarse:min-h-11">
                         <input
@@ -252,6 +286,49 @@ export default function StepReview() {
         </Card>
 
         <div className="flex flex-col gap-5">
+          <Card as="section" aria-labelledby="check-title">
+            <CardTitle id="check-title" icon="checkCircle">
+              원문 대조
+            </CardTitle>
+            {hasText ? (
+              <div className="mt-3 flex flex-col gap-2 text-sm">
+                <p className="text-ink-muted">AI가 뽑은 값이 논문에 그대로 적혀 있는지 맞춰 본 결과예요.</p>
+                <p className="flex flex-wrap gap-1.5">
+                  <Badge tone="ok" icon="check">
+                    논문 명시 {counts.paper}개
+                  </Badge>
+                  <Badge tone="accent" icon="sparkles">
+                    AI 해석 {counts.ai}개
+                  </Badge>
+                </p>
+                <p className="text-ink-muted">
+                  「AI 해석」은 원문에서 그대로 찾지 못한 값이에요. AI가 단위를 바꾸거나 추정했거나 직접 고친 값일 수 있으니 꼭 원문과 대조하세요. 단계 이름(한국어 요약)과 대기 여부는 항상 AI가 정해요.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-ink-muted">직접 입력한 내용이라 대조할 원문이 없어요.</p>
+            )}
+
+            <div className="mt-4 border-t border-line pt-3">
+              <p className="text-sm font-medium text-ink">시약이 실제로 있는 물질인지</p>
+              <p className="mt-0.5 text-sm text-ink-muted">내장 목록과 PubChem에서 이름을 찾아 봐요. AI가 이름을 잘못 읽었거나 지어낸 경우를 걸러 낼 수 있어요.</p>
+              <p className="mt-2 flex flex-wrap gap-1.5">
+                <Badge tone="ok" icon="checkCircle">
+                  확인 {existence.builtin + existence.found}개
+                </Badge>
+                {existence.notfound > 0 && (
+                  <Badge tone="danger" icon="alert">
+                    못 찾음 {existence.notfound}개
+                  </Badge>
+                )}
+                {existence.pending > 0 && <Badge icon="info">미확인 {existence.pending}개</Badge>}
+              </p>
+              <Button variant="secondary" size="sm" className="mt-3 w-full" aria-disabled={checking} aria-busy={checking} onClick={() => !checking && checkReagents()}>
+                <Icon name="refresh" size={16} />
+                {checking ? "확인하는 중…" : "시약 확인하기"}
+              </Button>
+            </div>
+          </Card>
           <Card as="section" aria-labelledby="meta-title">
             <CardTitle id="meta-title" icon="sparkles">
               분석 정보

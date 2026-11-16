@@ -21,7 +21,7 @@ function cleanMwMap(map) {
   if (!map || typeof map !== "object") return out;
   for (const [key, e] of Object.entries(map).slice(0, 1000)) {
     if (!e || typeof e !== "object") continue;
-    if (Number.isFinite(e.mw) && e.mw > 0) out[key] = { mw: e.mw, formula: typeof e.formula === "string" ? e.formula : undefined, source: str(e.source, 20) || undefined };
+    if (Number.isFinite(e.mw) && e.mw > 0) out[key] = { mw: e.mw, formula: typeof e.formula === "string" ? e.formula.slice(0, 60) : undefined, source: str(e.source, 20) || undefined };
     else if (e.notFound === true) out[key] = { notFound: true };
   }
   return out;

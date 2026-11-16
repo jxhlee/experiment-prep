@@ -2,14 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { computeRow, formatAmount, mergeResults, namesNeedingLookup, scaleResult } from "../../lib/chem.mjs";
+import { computeRow, formatAmount, mergeResults, namesNeedingLookup, normalizeName, scaleResult } from "../../lib/chem.mjs";
 import { buildNarrative, buildTimeline, formatMinutes } from "../../lib/timeline.mjs";
 import { ScaleControl, SigFigsControl } from "../controls";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
-import MwOverride from "../MwOverride";
+import MwPicker from "../MwPicker";
+import { formCandidates, matchForm } from "../../lib/forms.mjs";
+import { analyzeReagent, analyzeStep } from "../../lib/provenance.mjs";
 import SaveCard from "../SaveCard";
 import { Card, CardTitle, EmptyState, PageHeader, Segmented, Stat, TabPanel, Tabs, buttonClass } from "../ui";
+import DisposalPanel from "./DisposalPanel";
+import { EvidenceDetails, ExistenceChip, ProvenanceSummary } from "./Provenance";
 import { focusSoon } from "./focus";
 import Stepper from "./Stepper";
 import Timeline from "./Timeline";
@@ -23,10 +27,24 @@ function Notes({ notes }) {
   ));
 }
 
+/** 같은 시약에 다른 형태(무수물·수화물)가 있으면, 지금 어느 형태 기준인지 알려 준다 */
+function FormHint({ name, mw }) {
+  const family = formCandidates(name);
+  if (!family) return null;
+  const at = matchForm(family.forms, mw);
+  return (
+    <p className="mt-1 text-sm text-ink-muted">
+      <span className="font-medium text-ink">{family.forms.length}가지 형태</span>가 있는 시약이에요. 지금은{" "}
+      <span className="font-medium text-ink">{at >= 0 ? family.forms[at].label : `분자량 ${mw}`}</span> 기준이에요. 시약병 라벨의 형태를 확인하세요.
+    </p>
+  );
+}
+
 export default function StepResult() {
   const {
     reagents, timeline, mwMap, sigFigs, setSigFigs, scaleFactor, setScaleFactor,
     auth, setMw, prepareResults, isCalculating, markReached, hasWork, hydrated,
+    methodText, reagentInfo, checkReagents,
   } = useExperiment();
   const [tab, setTab] = useState("table");
   const [mergeMode, setMergeMode] = useState(false);
@@ -41,6 +59,22 @@ export default function StepResult() {
     if (needsLookup) prepareResults();
   }, [needsLookup, prepareResults]);
 
+  // 시약이 실제로 있는 물질인지 PubChem 에서 확인한다 (화면은 기다리지 않고, 확인되는 대로 표시한다)
+  const namesSig = reagents.map((r) => r.name.trim()).filter(Boolean).join("|");
+  useEffect(() => {
+    if (hydrated) checkReagents();
+  }, [hydrated, namesSig, checkReagents]);
+
+  const rowAnalysis = useMemo(() => reagents.map((r) => analyzeReagent(r, methodText)), [reagents, methodText]);
+  const stepProv = useMemo(() => {
+    const out = {};
+    for (const st of timeline) {
+      const a = analyzeStep(st, methodText);
+      if (a) out[st.id] = a;
+    }
+    return out;
+  }, [timeline, methodText]);
+
   const baseResults = useMemo(
     () => reagents.map((r) => ({ id: r.id, name: r.name, res: computeRow(r, { mwMap }) })),
     [reagents, mwMap],
@@ -54,8 +88,8 @@ export default function StepResult() {
   const scaleText = scaleFactor === 1 ? "" : ` × ${scaleFactor}배`;
 
   // 분자량을 적용하면 이 줄의 모양이 바뀌어 누르던 버튼이 사라지므로, 같은 줄의 이름 칸으로 포커스를 옮긴다
-  const applyMw = (row, mw) => {
-    setMw(row.name, mw);
+  const applyMw = (row, mw, form = "") => {
+    setMw(row.name, mw, form);
     focusSoon(`result-row-${row.id}`);
   };
 
@@ -110,6 +144,7 @@ export default function StepResult() {
             tabs={[
               { id: "table", label: "계량 준비표", icon: "table", count: reagents.length },
               { id: "timeline", label: "타임라인", icon: "clock", count: tl.items.length },
+              { id: "disposal", label: "폐기·안전", icon: "alert" },
             ]}
           />
 
@@ -170,7 +205,7 @@ export default function StepResult() {
                             <td className="px-4 py-3 text-[15px] font-semibold tabular-nums text-ink">{formatAmount(m, sigFigs)}</td>
                           </tr>
                         ))
-                      : rows.map((r) => (
+                      : rows.map((r, idx) => (
                           <tr key={r.id} className="border-t border-line align-top">
                             <th
                               scope="row"
@@ -189,8 +224,9 @@ export default function StepResult() {
                                     {scaleText}
                                   </span>
                                   <Notes notes={r.res.notes} />
-                                  {(r.res.mwSource === "PubChem" || r.res.mwSource === "직접 입력") && (
-                                    <MwOverride name={r.name} editing loggedIn={Boolean(auth.user)} onApply={(mw) => applyMw(r, mw)} />
+                                  {r.res.mw != null && <FormHint name={r.name} mw={r.res.mw} />}
+                                  {r.res.mw != null && (
+                                    <MwPicker name={r.name} currentMw={r.res.mw} loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
                                   )}
                                 </>
                               ) : (
@@ -203,9 +239,18 @@ export default function StepResult() {
                                     </span>
                                   </p>
                                   {r.res.code === "not-found" && (
-                                    <MwOverride name={r.name} loggedIn={Boolean(auth.user)} onApply={(mw) => applyMw(r, mw)} />
+                                    <MwPicker name={r.name} notFound loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
                                   )}
                                 </>
+                              )}
+                              {r.name.trim() && (
+                                <div className="mt-2 flex flex-col gap-1.5">
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                    <ProvenanceSummary analysis={rowAnalysis[idx]} />
+                                    <ExistenceChip name={r.name} info={reagentInfo[normalizeName(r.name).key]} />
+                                  </div>
+                                  {rowAnalysis[idx] && <EvidenceDetails evidence={rowAnalysis[idx].evidence} />}
+                                </div>
                               )}
                             </td>
                           </tr>
@@ -225,7 +270,7 @@ export default function StepResult() {
           </TabPanel>
 
           <TabPanel idPrefix="result" id="timeline" value={tab} className="flex flex-col gap-6 pt-4">
-            <Timeline tl={tl} />
+            <Timeline tl={tl} prov={stepProv} />
             <section aria-labelledby="narrative-heading">
               <CardTitle id="narrative-heading" icon="list">
                 진행 설명
@@ -242,6 +287,10 @@ export default function StepResult() {
                 )}
               </div>
             </section>
+          </TabPanel>
+        
+          <TabPanel idPrefix="result" id="disposal" value={tab} className="pt-4">
+            {tab === "disposal" && <DisposalPanel />}
           </TabPanel>
         </Card>
 
