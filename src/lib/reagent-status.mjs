@@ -12,7 +12,7 @@ export const KOSHA_MSDS_URL = "https://msds.kosha.or.kr";
 export function existenceOf(name, info) {
   const n = String(name ?? "").trim();
   if (!n) return null;
-  if (findEntry(n)) return { kind: "builtin", tone: "ok", text: "내장 시약 목록에 있어요" };
+  if (findEntry(n)) return { kind: "builtin", tone: "ok", text: "분자량 DB에 있는 시약이에요" };
   if (isMixtureName(n)) return { kind: "mixture", tone: "neutral", text: "혼합 용액이라 시약 하나로 확인할 수 없어요" };
   switch (info?.state) {
     case "found":

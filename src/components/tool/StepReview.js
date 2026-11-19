@@ -3,20 +3,21 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { normalizeName } from "../../lib/chem.mjs";
 import { analyzeReagent, analyzeStep, countSources } from "../../lib/provenance.mjs";
-import { summarizeExistence } from "../../lib/reagent-status.mjs";
+import { reagentIssues, stepIssues } from "../../lib/row-issues.mjs";
+import { normalizeName } from "../../lib/chem.mjs";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
-import SaveCard from "../SaveCard";
-import { Alert, Badge, Button, Card, CardTitle, PageHeader, TabPanel, Tabs, buttonClass, inputClass } from "../ui";
+import SaveControl from "../SaveControl";
+import { Alert, Button, Card, IconButton, IssueList, PageHeader, TabPanel, Tabs, buttonClass, cellInputClass } from "../ui";
+import CheckStrip from "./CheckStrip";
+import { EvidenceQuote } from "./Provenance";
 import { focusSoon } from "./focus";
-import { AiOnlyBadge, EvidenceDetails, ExistenceChip, ReagentSources, SourceBadge } from "./Provenance";
 import Stepper from "./Stepper";
 
-const REAGENT_COLS = "md:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_auto] md:items-end md:gap-3";
-const labelClass = "mb-1 block text-sm font-medium text-ink md:sr-only";
-const miniLabel = "mb-1 block text-sm font-medium text-ink";
+const COLS = "md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]";
+const label = "mb-0.5 block text-sm text-ink-muted";
+const aiLine = (ai) => (ai ? "border-accent!" : "");
 
 export default function StepReview() {
   const router = useRouter();
@@ -24,26 +25,22 @@ export default function StepReview() {
     reagents, setReagents, timeline, setTimeline, newRowId, newStepId,
     analysisMeta, analyzeError, isAnalyzing, analyze,
     prepareResults, isCalculating, markReached, notify,
-    methodText, reagentInfo, checkReagents,
+    methodText, reagentInfo, inventoryIndex,
   } = useExperiment();
   const [tab, setTab] = useState("reagents");
+  const [openEvidence, setOpenEvidence] = useState({});
 
   // 값이 논문 원문에 적혀 있는지 대조한 결과 (원문이 없으면 null)
   const rowAnalysis = useMemo(() => reagents.map((r) => analyzeReagent(r, methodText)), [reagents, methodText]);
   const stepAnalysis = useMemo(() => timeline.map((st) => analyzeStep(st, methodText)), [timeline, methodText]);
   const counts = countSources([...rowAnalysis, ...stepAnalysis]);
-  const hasText = methodText.trim() !== "";
-  const keyOf = (n) => normalizeName(n).key;
-  const existence = summarizeExistence(reagents.map((r) => r.name), reagentInfo, keyOf);
-  const checking = reagents.some((r) => reagentInfo[keyOf(r.name)]?.state === "checking");
+  const toggleEvidence = (key) => setOpenEvidence((o) => ({ ...o, [key]: !o[key] }));
 
   useEffect(() => {
     markReached(2);
   }, [markReached]);
 
-  const updateRow = (id, field, value) => {
-    setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
-  };
+  const updateRow = (id, field, value) => setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   const addRow = () => {
     const id = newRowId();
     setReagents((rows) => [...rows, { id, name: "", concentration: "", volume: "" }]);
@@ -55,9 +52,7 @@ export default function StepReview() {
     focusSoon("add-reagent");
   };
 
-  const updateStep = (id, field, value) => {
-    setTimeline((steps) => steps.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
-  };
+  const updateStep = (id, field, value) => setTimeline((steps) => steps.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
   const addStep = () => {
     const id = newStepId();
     setTimeline((steps) => [...steps, { id, label: "", duration: "", repeat: 1, details: "", isWaiting: false }]);
@@ -77,137 +72,147 @@ export default function StepReview() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title="추출 결과 확인·수정" description="AI가 읽어 낸 시약과 실행 단계예요. 틀리거나 빠진 곳은 직접 고쳐 주세요. 모든 칸을 고칠 수 있어요." />
+    <div className="flex flex-col gap-6">
+      <PageHeader title="확인·수정" description="AI가 읽은 내용이에요. 틀린 곳은 바로 고쳐 주세요." actions={<SaveControl />} />
       <Stepper step={2} />
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <Card className="min-w-0">
+      {(analysisMeta || analyzeError) && (
+        <div className="flex flex-col gap-2 text-sm text-ink-muted">
+          {analysisMeta && (
+            <p className="flex flex-wrap items-center gap-x-2">
+              {analysisMeta.fromCache ? "저장된 분석 결과를 불러왔어요 (AI 호출 없음)" : `${analysisMeta.model || "AI"}로 분석했어요`}
+              <Button variant="link" size="sm" aria-disabled={isAnalyzing} onClick={() => !isAnalyzing && analyze({ force: true })}>
+                {isAnalyzing ? "분석하는 중…" : "AI로 다시 분석"}
+              </Button>
+              <span>(고친 내용은 사라져요)</span>
+            </p>
+          )}
+          {analyzeError && <Alert kind="error">{analyzeError.message}</Alert>}
+        </div>
+      )}
+
+      <Card flush>
+        <CheckStrip names={reagents.map((r) => r.name)} counts={counts} hasText={methodText.trim() !== ""} />
+
+        <div className="p-5">
           <Tabs
             label="확인할 내용"
             idPrefix="review"
             value={tab}
             onChange={setTab}
             tabs={[
-              { id: "reagents", label: "시약", icon: "beaker", count: reagents.length },
-              { id: "steps", label: "실행 단계", icon: "list", count: timeline.length },
+              { id: "reagents", label: "시약", count: reagents.length },
+              { id: "steps", label: "실행 단계", count: timeline.length },
             ]}
           />
 
           <TabPanel idPrefix="review" id="reagents" value={tab} className="pt-4">
-            <p className="text-sm text-ink-muted">농도와 부피가 있으면 필요한 양을 계산해요. 농도 칸에 양만 적혀 있어도 괜찮아요.</p>
-            <div aria-hidden="true" className={`mt-3 hidden px-3 text-sm text-ink-muted md:grid ${REAGENT_COLS}`}>
+            <div aria-hidden="true" className={`hidden gap-x-4 border-b border-line px-1 pb-2 text-sm text-ink-muted md:grid ${COLS}`}>
               <span>시약 이름</span>
               <span>농도</span>
               <span>부피</span>
               <span className="w-[4.75rem]" />
             </div>
-            <ul className="mt-2 flex flex-col gap-2.5">
-              {reagents.length === 0 && (
-                <li className="rounded-lg border border-dashed border-line-strong p-4 text-center text-sm text-ink-muted">
-                  시약이 없어요. 아래 버튼으로 한 줄 추가해 주세요.
-                </li>
-              )}
-              {reagents.map((row, i) => (
-                <li key={row.id}>
-                  <fieldset className={`grid grid-cols-2 gap-2.5 rounded-lg border border-line p-3 ${REAGENT_COLS}`}>
-                    <legend className="px-1 text-sm font-medium text-ink-muted md:sr-only">시약 {i + 1}</legend>
-                    <div className="col-span-2 min-w-0 md:col-span-1">
-                      <label htmlFor={`reagent-name-${row.id}`} className={labelClass}>
-                        시약 이름<span className="sr-only"> ({i + 1}번 줄)</span>
-                      </label>
-                      <input
-                        id={`reagent-name-${row.id}`}
-                        value={row.name}
-                        onChange={(e) => updateRow(row.id, "name", e.target.value)}
-                        placeholder="예: NaCl"
-                        autoComplete="off"
-                        className={inputClass}
-                      />
+            <ul className="divide-y divide-line">
+              {reagents.length === 0 && <li className="py-8 text-center text-sm text-ink-muted">시약이 없어요. 아래 버튼으로 추가해 주세요.</li>}
+              {reagents.map((row, i) => {
+                const a = rowAnalysis[i];
+                const issues = reagentIssues({ name: row.name, analysis: a, info: reagentInfo[normalizeName(row.name).key], inventoryIndex });
+                const evId = `evidence-reagent-${row.id}`;
+                const open = Boolean(openEvidence[`r${row.id}`]);
+                return (
+                  <li key={row.id} className="py-3">
+                    <div role="group" aria-label={`시약 ${i + 1}`} className={`grid grid-cols-2 gap-x-4 gap-y-2 md:items-center ${COLS}`}>
+                      <div className="col-span-2 min-w-0 md:col-span-1">
+                        <label htmlFor={`reagent-name-${row.id}`} className={`${label} md:sr-only`}>
+                          시약 이름<span className="sr-only"> ({i + 1}번 줄)</span>
+                        </label>
+                        <input
+                          id={`reagent-name-${row.id}`}
+                          value={row.name}
+                          onChange={(e) => updateRow(row.id, "name", e.target.value)}
+                          placeholder="예: NaCl"
+                          autoComplete="off"
+                          className={`${cellInputClass} ${aiLine(a?.name === "ai")}`}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <label htmlFor={`reagent-conc-${row.id}`} className={`${label} md:sr-only`}>
+                          농도<span className="sr-only"> ({i + 1}번 줄)</span>
+                        </label>
+                        <input
+                          id={`reagent-conc-${row.id}`}
+                          value={row.concentration}
+                          onChange={(e) => updateRow(row.id, "concentration", e.target.value)}
+                          placeholder="예: 0.9 %"
+                          autoComplete="off"
+                          className={`${cellInputClass} ${aiLine(a?.concentration === "ai")}`}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <label htmlFor={`reagent-vol-${row.id}`} className={`${label} md:sr-only`}>
+                          부피<span className="sr-only"> ({i + 1}번 줄)</span>
+                        </label>
+                        <input
+                          id={`reagent-vol-${row.id}`}
+                          value={row.volume}
+                          onChange={(e) => updateRow(row.id, "volume", e.target.value)}
+                          placeholder="예: 500 mL"
+                          autoComplete="off"
+                          className={`${cellInputClass} ${aiLine(a?.volume === "ai")}`}
+                        />
+                      </div>
+                      <div className="col-span-2 flex justify-end md:col-span-1">
+                        {a ? (
+                          <IconButton
+                            icon="clipboard"
+                            label={`${i + 1}번 줄 원문 근거 ${open ? "닫기" : "보기"}`}
+                            aria-expanded={open}
+                            aria-controls={evId}
+                            onClick={() => toggleEvidence(`r${row.id}`)}
+                          />
+                        ) : (
+                          <span className="hidden h-9 w-9 md:block" aria-hidden="true" />
+                        )}
+                        <IconButton icon="trash" label={`${i + 1}번 줄 삭제`} onClick={() => removeRow(row.id, i)} />
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <label htmlFor={`reagent-conc-${row.id}`} className={labelClass}>
-                        농도<span className="sr-only"> ({i + 1}번 줄)</span>
-                      </label>
-                      <input
-                        id={`reagent-conc-${row.id}`}
-                        value={row.concentration}
-                        onChange={(e) => updateRow(row.id, "concentration", e.target.value)}
-                        placeholder="예: 0.9 %"
-                        autoComplete="off"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label htmlFor={`reagent-vol-${row.id}`} className={labelClass}>
-                        부피<span className="sr-only"> ({i + 1}번 줄)</span>
-                      </label>
-                      <input
-                        id={`reagent-vol-${row.id}`}
-                        value={row.volume}
-                        onChange={(e) => updateRow(row.id, "volume", e.target.value)}
-                        placeholder="예: 500 mL"
-                        autoComplete="off"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="col-span-2 md:col-span-1">
-                      <Button
-                        variant="secondary"
-                        className="w-full md:w-[4.75rem]"
-                        aria-label={`시약 ${i + 1}번 줄 삭제`}
-                        onClick={() => removeRow(row.id, i)}
-                      >
-                        <Icon name="trash" size={16} />
-                        삭제
-                      </Button>
-                    </div>
-                    {row.name.trim() && (
-                      <div className="col-span-2 flex flex-col gap-1.5 md:col-span-4">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                          <ReagentSources analysis={rowAnalysis[i]} />
-                          <ExistenceChip name={row.name} info={reagentInfo[keyOf(row.name)]} />
-                        </div>
-                        {rowAnalysis[i] && <EvidenceDetails evidence={rowAnalysis[i].evidence} />}
+                    {(issues.length > 0 || (a && open)) && (
+                      <div className="mt-2 flex flex-col gap-2 px-1">
+                        <IssueList issues={issues} />
+                        {a && open && <EvidenceQuote id={evId} evidence={a.evidence} />}
                       </div>
                     )}
-                  </fieldset>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
-            <Button id="add-reagent" variant="secondary" className="mt-3" onClick={addRow}>
+            <Button id="add-reagent" variant="secondary" size="sm" className="mt-3" onClick={addRow}>
               <Icon name="plus" size={16} />
-              시약 한 줄 추가
+              시약 추가
             </Button>
           </TabPanel>
 
           <TabPanel idPrefix="review" id="steps" value={tab} className="pt-4">
-            <p className="text-sm text-ink-muted">시간이 비어 있는 단계는 전체 소요 시간 계산에서 빠져요.</p>
-            <ol className="mt-3 flex flex-col gap-2.5">
-              {timeline.length === 0 && (
-                <li className="rounded-lg border border-dashed border-line-strong p-4 text-center text-sm text-ink-muted">
-                  추출된 단계가 없어요. 아래 버튼으로 직접 추가할 수 있어요.
-                </li>
-              )}
-              {timeline.map((s, i) => (
-                <li key={s.id}>
-                  <fieldset className="rounded-lg border border-line p-3">
-                    <legend className="px-1 text-sm font-medium text-ink-muted">단계 {i + 1}</legend>
-                    <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_6rem]">
-                      <div className="min-w-0 sm:col-span-2 lg:col-span-1">
-                        <label htmlFor={`step-label-${s.id}`} className={miniLabel}>
-                          단계 이름
+            <p className="text-sm text-ink-muted">시간이 비어 있는 단계는 총 소요 시간에서 빠져요. 단계 이름은 AI가 한국어로 요약한 말이에요.</p>
+            <ol className="mt-2 divide-y divide-line">
+              {timeline.length === 0 && <li className="py-8 text-center text-sm text-ink-muted">단계가 없어요. 아래 버튼으로 추가해 주세요.</li>}
+              {timeline.map((s, i) => {
+                const a = stepAnalysis[i];
+                const evId = `evidence-step-${s.id}`;
+                const open = Boolean(openEvidence[`s${s.id}`]);
+                const issues = stepIssues({ analysis: a });
+                return (
+                  <li key={s.id} className="py-3">
+                    <div role="group" aria-label={`단계 ${i + 1}`} className="grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_5rem_minmax(0,1.4fr)_auto] md:items-end">
+                      <div className="col-span-2 min-w-0 md:col-span-1">
+                        <label htmlFor={`step-label-${s.id}`} className={label}>
+                          {i + 1}. 단계 이름
                         </label>
-                        <input
-                          id={`step-label-${s.id}`}
-                          value={s.label}
-                          onChange={(e) => updateStep(s.id, "label", e.target.value)}
-                          autoComplete="off"
-                          className={inputClass}
-                        />
+                        <input id={`step-label-${s.id}`} value={s.label} onChange={(e) => updateStep(s.id, "label", e.target.value)} autoComplete="off" className={cellInputClass} />
                       </div>
                       <div className="min-w-0">
-                        <label htmlFor={`step-duration-${s.id}`} className={miniLabel}>
+                        <label htmlFor={`step-duration-${s.id}`} className={label}>
                           걸리는 시간
                         </label>
                         <input
@@ -216,12 +221,12 @@ export default function StepReview() {
                           onChange={(e) => updateStep(s.id, "duration", e.target.value)}
                           placeholder="예: 30 min"
                           autoComplete="off"
-                          className={inputClass}
+                          className={`${cellInputClass} ${aiLine(a?.duration === "ai")}`}
                         />
                       </div>
                       <div className="min-w-0">
-                        <label htmlFor={`step-repeat-${s.id}`} className={miniLabel}>
-                          반복 횟수
+                        <label htmlFor={`step-repeat-${s.id}`} className={label}>
+                          반복
                         </label>
                         <input
                           id={`step-repeat-${s.id}`}
@@ -230,147 +235,69 @@ export default function StepReview() {
                           inputMode="numeric"
                           value={s.repeat}
                           onChange={(e) => updateStep(s.id, "repeat", e.target.value)}
-                          className={inputClass}
+                          className={`${cellInputClass} ${aiLine(a?.repeat === "ai")}`}
                         />
                       </div>
-                      <div className="min-w-0 sm:col-span-2 lg:col-span-3">
-                        <label htmlFor={`step-details-${s.id}`} className={miniLabel}>
-                          조건 <span className="font-normal text-ink-muted">(온도·속도 등, 없으면 비워 두세요)</span>
+                      <div className="col-span-2 min-w-0 md:col-span-1">
+                        <label htmlFor={`step-details-${s.id}`} className={label}>
+                          조건
                         </label>
                         <input
                           id={`step-details-${s.id}`}
                           value={s.details}
                           onChange={(e) => updateStep(s.id, "details", e.target.value)}
+                          placeholder="온도·속도 등"
                           autoComplete="off"
-                          className={inputClass}
+                          className={`${cellInputClass} ${aiLine(a?.details === "ai")}`}
                         />
                       </div>
+                      <div className="col-span-2 flex items-center justify-between gap-2 md:col-span-1 md:justify-end">
+                        <label className="flex min-h-9 cursor-pointer items-center gap-2 text-sm text-ink md:hidden pointer-coarse:min-h-11">
+                          <input type="checkbox" checked={s.isWaiting} onChange={(e) => updateStep(s.id, "isWaiting", e.target.checked)} className="h-5 w-5 accent-brand" />
+                          대기 단계
+                        </label>
+                        {a && (
+                          <IconButton
+                            icon="clipboard"
+                            label={`${i + 1}단계 원문 근거 ${open ? "닫기" : "보기"}`}
+                            aria-expanded={open}
+                            aria-controls={evId}
+                            onClick={() => toggleEvidence(`s${s.id}`)}
+                          />
+                        )}
+                        <IconButton icon="trash" label={`${i + 1}단계 삭제`} onClick={() => removeStep(s.id, i)} />
+                      </div>
                     </div>
-                    {stepAnalysis[i] && (
-                      <div className="mt-2.5 flex flex-col gap-1.5">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                          <AiOnlyBadge field="단계 이름·대기 여부" />
-                          <SourceBadge src={stepAnalysis[i].duration} field="시간" />
-                          <SourceBadge src={stepAnalysis[i].repeat} field="반복" />
-                          <SourceBadge src={stepAnalysis[i].details} field="조건" />
-                        </div>
-                        <EvidenceDetails evidence={stepAnalysis[i].evidence} missing="이 시간이 적힌 문장을 원문에서 찾지 못했어요. 원문과 직접 대조해 주세요." />
+                    <label className="mt-2 hidden min-h-9 cursor-pointer items-center gap-2 px-1 text-sm text-ink md:flex">
+                      <input type="checkbox" checked={s.isWaiting} onChange={(e) => updateStep(s.id, "isWaiting", e.target.checked)} className="h-4 w-4 accent-brand" />
+                      대기 단계 <span className="text-ink-muted">(지켜보지 않아도 되는 시간)</span>
+                    </label>
+                    {(issues.length > 0 || (a && open)) && (
+                      <div className="mt-2 flex flex-col gap-2 px-1">
+                        <IssueList issues={issues} />
+                        {a && open && <EvidenceQuote id={evId} evidence={a.evidence} missing="이 시간이 적힌 문장을 원문에서 찾지 못했어요. 원문과 직접 대조해 주세요." />}
                       </div>
                     )}
-                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                      <label className="flex min-h-10 cursor-pointer items-center gap-2.5 text-sm text-ink pointer-coarse:min-h-11">
-                        <input
-                          type="checkbox"
-                          checked={s.isWaiting}
-                          onChange={(e) => updateStep(s.id, "isWaiting", e.target.checked)}
-                          className="h-5 w-5 shrink-0 accent-brand"
-                        />
-                        <span>
-                          대기 단계 <span className="text-ink-muted">(지켜보지 않아도 되는 시간)</span>
-                        </span>
-                      </label>
-                      <Button variant="secondary" size="sm" aria-label={`${i + 1}단계 삭제`} onClick={() => removeStep(s.id, i)}>
-                        <Icon name="trash" size={16} />
-                        삭제
-                      </Button>
-                    </div>
-                  </fieldset>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ol>
-            <Button id="add-step" variant="secondary" className="mt-3" onClick={addStep}>
+            <Button id="add-step" variant="secondary" size="sm" className="mt-3" onClick={addStep}>
               <Icon name="plus" size={16} />
               단계 추가
             </Button>
           </TabPanel>
-        </Card>
-
-        <div className="flex flex-col gap-5">
-          <Card as="section" aria-labelledby="check-title">
-            <CardTitle id="check-title" icon="checkCircle">
-              원문 대조
-            </CardTitle>
-            {hasText ? (
-              <div className="mt-3 flex flex-col gap-2 text-sm">
-                <p className="text-ink-muted">AI가 뽑은 값이 논문에 그대로 적혀 있는지 맞춰 본 결과예요.</p>
-                <p className="flex flex-wrap gap-1.5">
-                  <Badge tone="ok" icon="check">
-                    논문 명시 {counts.paper}개
-                  </Badge>
-                  <Badge tone="accent" icon="sparkles">
-                    AI 해석 {counts.ai}개
-                  </Badge>
-                </p>
-                <p className="text-ink-muted">
-                  「AI 해석」은 원문에서 그대로 찾지 못한 값이에요. AI가 단위를 바꾸거나 추정했거나 직접 고친 값일 수 있으니 꼭 원문과 대조하세요. 단계 이름(한국어 요약)과 대기 여부는 항상 AI가 정해요.
-                </p>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-ink-muted">직접 입력한 내용이라 대조할 원문이 없어요.</p>
-            )}
-
-            <div className="mt-4 border-t border-line pt-3">
-              <p className="text-sm font-medium text-ink">시약이 실제로 있는 물질인지</p>
-              <p className="mt-0.5 text-sm text-ink-muted">내장 목록과 PubChem에서 이름을 찾아 봐요. AI가 이름을 잘못 읽었거나 지어낸 경우를 걸러 낼 수 있어요.</p>
-              <p className="mt-2 flex flex-wrap gap-1.5">
-                <Badge tone="ok" icon="checkCircle">
-                  확인 {existence.builtin + existence.found}개
-                </Badge>
-                {existence.notfound > 0 && (
-                  <Badge tone="danger" icon="alert">
-                    못 찾음 {existence.notfound}개
-                  </Badge>
-                )}
-                {existence.pending > 0 && <Badge icon="info">미확인 {existence.pending}개</Badge>}
-              </p>
-              <Button variant="secondary" size="sm" className="mt-3 w-full" aria-disabled={checking} aria-busy={checking} onClick={() => !checking && checkReagents()}>
-                <Icon name="refresh" size={16} />
-                {checking ? "확인하는 중…" : "시약 확인하기"}
-              </Button>
-            </div>
-          </Card>
-          <Card as="section" aria-labelledby="meta-title">
-            <CardTitle id="meta-title" icon="sparkles">
-              분석 정보
-            </CardTitle>
-            <div className="mt-3 text-sm">
-              {analysisMeta ? (
-                <>
-                  {analysisMeta.fromCache ? (
-                    <Badge icon="check">저장된 결과 · AI 호출 없음</Badge>
-                  ) : (
-                    <p className="text-ink-muted">
-                      분석 모델 <span className="font-medium text-ink">{analysisMeta.model || "알 수 없음"}</span>
-                    </p>
-                  )}
-                  <Button variant="secondary" size="sm" className="mt-3 w-full" aria-disabled={isAnalyzing} onClick={() => !isAnalyzing && analyze({ force: true })}>
-                    <Icon name="refresh" size={16} />
-                    {isAnalyzing ? "분석하는 중…" : "AI로 다시 분석"}
-                  </Button>
-                  <p className="mt-2 text-ink-muted">다시 분석하면 지금까지 고친 내용은 사라져요.</p>
-                </>
-              ) : (
-                <p className="text-ink-muted">직접 입력한 내용이에요. AI 분석은 거치지 않았어요.</p>
-              )}
-            </div>
-            {analyzeError && (
-              <Alert kind="error" className="mt-3">
-                {analyzeError.message}
-              </Alert>
-            )}
-          </Card>
-          <SaveCard />
         </div>
-      </div>
+      </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
-        <Link href="/new" className={buttonClass({ variant: "secondary" })}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/new" className={buttonClass({ variant: "ghost" })}>
           <Icon name="arrowLeft" size={16} />
           입력으로
         </Link>
         <Button size="lg" aria-disabled={isCalculating} aria-busy={isCalculating} onClick={onCalculate}>
-          <Icon name="calculator" size={18} />
           {isCalculating ? "계산하는 중…" : "계산하기"}
+          <Icon name="arrowRight" size={18} />
         </Button>
       </div>
     </div>

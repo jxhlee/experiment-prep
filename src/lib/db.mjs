@@ -102,3 +102,28 @@ export function mergeLibrary(current, library) {
   }
   return merged;
 }
+
+// --- 보유 시약 목록 (우리 학교·연구실에 있는 시약) ------------------------------------------------
+
+/** 내 보유 시약 → [{ key, name }] (이름순) */
+export async function listInventory(sb) {
+  return check(await sb.from("inventory_items").select("key, name").order("name", { ascending: true }).limit(2000));
+}
+
+/** 이미 있는 항목(같은 key)은 그대로 두고 새 항목만 넣는다 */
+export async function addInventory(sb, userId, items) {
+  const rows = items
+    .filter((i) => i.key && i.name)
+    .map((i) => ({ user_id: userId, key: String(i.key).slice(0, 120), name: String(i.name).slice(0, 120) }));
+  if (rows.length === 0) return;
+  check(await sb.from("inventory_items").upsert(rows, { onConflict: "user_id,key", ignoreDuplicates: true }));
+}
+
+export async function deleteInventoryItem(sb, key) {
+  check(await sb.from("inventory_items").delete().eq("key", key));
+}
+
+/** 내 보유 시약을 모두 지운다 (RLS 가 내 행만 지운다. PostgREST 는 조건이 있어야 해서 항상 참인 조건을 붙인다) */
+export async function clearInventory(sb) {
+  check(await sb.from("inventory_items").delete().neq("key", ""));
+}

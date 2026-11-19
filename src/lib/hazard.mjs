@@ -201,7 +201,7 @@ function inferFromElements(c) {
 export function classifyReagent({ name, formula, ghs = null }) {
   const c = context(name, formula);
   let base = (c.display && CURATED.get(c.display)) || null;
-  let basis = base ? "내장 시약 분류표" : "";
+  let basis = base ? "기본 분류표" : "";
 
   if (!base) {
     for (const rule of NAME_RULES) {
@@ -267,7 +267,7 @@ export function classifyReagent({ name, formula, ghs = null }) {
     hazards,
     signal: signalWord(codes),
     basis,
-    certain: basis === "내장 시약 분류표",
+    certain: basis === "기본 분류표",
     detail: base?.detail ?? "",
   };
 }

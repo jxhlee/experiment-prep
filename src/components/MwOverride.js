@@ -65,7 +65,7 @@ export default function MwOverride({ name, editing, loggedIn, onApply }) {
             </Button>
           </div>
           <p id={`${uid}-note`} className="mt-2 text-sm text-ink-muted">
-            {loggedIn ? "내 시약 목록에 저장돼 다음에도 쓰여요." : "로그인하면 저장돼요. 지금은 이번 방문에만 적용돼요."}
+            {loggedIn ? "분자량 기록에 저장돼 다음에도 쓰여요." : "로그인하면 저장돼요. 지금은 이번 방문에만 적용돼요."}
           </p>
         </form>
       )}

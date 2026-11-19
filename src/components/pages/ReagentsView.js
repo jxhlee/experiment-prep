@@ -39,7 +39,7 @@ export default function ReagentsView() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
-        title="내 시약"
+        title="분자량 기록"
         description="계산할 때 조회하거나 직접 입력한 분자량이 이곳에 쌓여요. 다음 분석부터는 다시 조회하지 않고 이 값을 써요."
       />
       <RequireLogin what="로그인하면 조회했던 시약의 분자량을 기억해 두었다가 다음에도 써요.">
@@ -58,7 +58,7 @@ export default function ReagentsView() {
           {state.rows.length > 0 && (
             <div className="overflow-hidden rounded-lg border border-line">
               <table className="w-full border-collapse text-left text-sm">
-                <caption className="sr-only">내 시약 목록: 이름, 화학식, 분자량, 출처</caption>
+                <caption className="sr-only">분자량 기록: 이름, 화학식, 분자량, 출처</caption>
                 <thead className="bg-surface-2 text-ink-muted">
                   <tr>
                     <th scope="col" className="px-4 py-2.5 font-medium">

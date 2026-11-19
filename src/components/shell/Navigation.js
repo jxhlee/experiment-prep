@@ -16,7 +16,8 @@ const GROUPS = [
     label: "보관함",
     items: [
       { href: "/experiments", label: "내 실험", icon: "folder" },
-      { href: "/reagents", label: "내 시약", icon: "beaker" },
+      { href: "/inventory", label: "보유 시약", icon: "inbox" },
+      { href: "/reagents", label: "분자량 기록", short: "분자량", icon: "calculator" },
     ],
   },
   {
@@ -78,14 +79,7 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
-      <div className="m-3 rounded-xl border border-line bg-surface-2 p-3 text-sm text-ink-muted">
-        <p className="flex items-center gap-1.5 font-medium text-ink">
-          <Icon name="info" size={16} />
-          꼭 확인하세요
-        </p>
-        <p className="mt-1 leading-relaxed">AI가 읽은 결과는 틀릴 수 있어요. 실험 전에 논문 원문과 대조해 주세요.</p>
-      </div>
-    </aside>
+      </aside>
   );
 }
 
@@ -98,7 +92,7 @@ export function MobileNav() {
       aria-label="하단 메뉴"
       className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
     >
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-6">
         {items.map((item) => {
           const active = isActive(pathname, item);
           return (
@@ -106,12 +100,12 @@ export function MobileNav() {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 text-sm no-underline ${
-                  active ? "font-semibold text-ink before:absolute before:inset-x-4 before:top-0 before:h-0.5 before:rounded-full before:bg-accent" : "text-ink-muted"
+                className={`relative flex min-h-14 flex-col items-center justify-center gap-0.5 px-0.5 text-center text-sm leading-tight no-underline ${
+                  active ? "font-semibold text-ink before:absolute before:inset-x-3 before:top-0 before:h-0.5 before:rounded-full before:bg-accent" : "text-ink-muted"
                 }`}
               >
                 <Icon name={item.icon} size={20} />
-                {item.label}
+                {item.short ?? item.label}
               </Link>
             </li>
           );

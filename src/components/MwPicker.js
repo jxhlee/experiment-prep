@@ -55,7 +55,7 @@ export default function MwPicker({ name, currentMw, notFound = false, loggedIn, 
     close();
   }
 
-  const toggleText = family ? "분자량 형태 바꾸기" : notFound ? "분자량 입력·형태 찾기" : "분자량 수정·형태 찾기";
+  const toggleText = family ? "형태 바꾸기" : notFound ? "분자량 입력" : "분자량 변경";
 
   return (
     <div className="mt-1">
@@ -152,7 +152,7 @@ export default function MwPicker({ name, currentMw, notFound = false, loggedIn, 
               취소
             </Button>
           </div>
-          <p className="text-sm text-ink-muted">{loggedIn ? "내 시약에 저장돼 다음에도 쓰여요." : "로그인하면 저장돼요. 지금은 이번 방문에만 적용돼요."}</p>
+          <p className="text-sm text-ink-muted">{loggedIn ? "분자량 기록에 저장돼 다음에도 쓰여요." : "로그인하면 저장돼요. 지금은 이번 방문에만 적용돼요."}</p>
         </form>
       )}
     </div>

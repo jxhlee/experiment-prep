@@ -35,10 +35,10 @@ export const inputClass =
   "block min-h-10 w-full rounded-lg border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-muted pointer-coarse:min-h-11";
 
 const ALERTS = {
-  error: { box: "border-danger/40 bg-danger-soft text-danger-ink", icon: "alert", role: "alert", label: "오류" },
-  warn: { box: "border-warn-ink/30 bg-warn-soft text-warn-ink", icon: "alert", role: "status", label: "주의" },
-  success: { box: "border-ok-ink/30 bg-ok-soft text-ok-ink", icon: "checkCircle", role: "status", label: "완료" },
-  info: { box: "border-line bg-surface-2 text-ink", icon: "info", role: "status", label: "안내" },
+  error: { box: "border-transparent bg-danger-soft text-danger-ink", icon: "alert", role: "alert", label: "오류" },
+  warn: { box: "border-transparent bg-warn-soft text-warn-ink", icon: "alert", role: "status", label: "주의" },
+  success: { box: "border-transparent bg-ok-soft text-ok-ink", icon: "checkCircle", role: "status", label: "완료" },
+  info: { box: "border-transparent bg-surface-2 text-ink", icon: "info", role: "status", label: "안내" },
 };
 
 /** 색에만 기대지 않도록 아이콘과 종류 이름을 함께 보여 준다 */
@@ -114,15 +114,14 @@ export function Segmented({ legend, name, value, onChange, options, hideLegend =
   );
 }
 
-export function Card({ as: Tag = "div", className = "", ...props }) {
-  return <Tag className={`rounded-xl border border-line bg-surface p-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] sm:p-5 ${className}`} {...props} />;
+export function Card({ as: Tag = "div", flush = false, className = "", ...props }) {
+  return <Tag className={`rounded-xl border border-line bg-surface ${flush ? "" : "p-5"} ${className}`} {...props} />;
 }
 
 /** 카드 안의 소제목 */
-export function CardTitle({ icon, children, id, className = "" }) {
+export function CardTitle({ children, id, className = "" }) {
   return (
-    <h2 id={id} className={`flex items-center gap-2 text-[15px] font-semibold text-ink ${className}`}>
-      {icon && <Icon name={icon} size={16} className="text-ink-muted" />}
+    <h2 id={id} className={`text-[15px] font-semibold text-ink ${className}`}>
       {children}
     </h2>
   );
@@ -246,5 +245,55 @@ export function TabPanel({ idPrefix, id, value, children, className = "" }) {
     <div role="tabpanel" id={`${idPrefix}-panel-${id}`} aria-labelledby={`${idPrefix}-tab-${id}`} hidden={value !== id} className={className}>
       {children}
     </div>
+  );
+}
+
+/** 표처럼 늘어선 입력칸: 상자 대신 밑줄로 경계를 보여 준다 (밑줄은 배경과 3:1 이상 대비) */
+export const cellInputClass =
+  "block min-h-10 w-full rounded-none border-0 border-b border-line-strong bg-transparent px-1 text-sm text-ink placeholder:text-ink-muted hover:bg-surface-2 focus:bg-surface-2 pointer-coarse:min-h-11";
+
+/** 아이콘만 있는 버튼. label 이 접근 가능한 이름이 된다. */
+export function IconButton({ icon, label, className = "", ...props }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink aria-disabled:opacity-60 pointer-coarse:h-11 pointer-coarse:w-11 ${className}`}
+      {...props}
+    >
+      <Icon name={icon} size={18} />
+    </button>
+  );
+}
+
+/** 자세한 설명은 접어 두고 필요할 때만 펼친다 */
+export function Disclosure({ summary, children, className = "" }) {
+  return (
+    <details className={`group text-sm ${className}`}>
+      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-md text-ink-muted marker:hidden hover:text-ink pointer-coarse:min-h-11 [&::-webkit-details-marker]:hidden">
+        <Icon name="chevronRight" size={14} className="transition-transform group-open:rotate-90" />
+        {summary}
+      </summary>
+      <div className="mt-1 text-ink-muted">{children}</div>
+    </details>
+  );
+}
+
+const ISSUE_TONES = { danger: "text-danger", warn: "text-warn-ink", accent: "text-accent" };
+
+/** 줄마다 주의할 것만 짧게 보여 준다. 정상인 것은 보여 주지 않는다. (아이콘 + 글자로 색에만 기대지 않는다) */
+export function IssueList({ issues, className = "" }) {
+  if (!issues || issues.length === 0) return null;
+  return (
+    <ul className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-sm ${className}`}>
+      {issues.map((i) => (
+        <li key={i.id} className={`inline-flex items-center gap-1 font-medium ${ISSUE_TONES[i.tone] ?? "text-ink"}`}>
+          <Icon name={i.icon} size={14} />
+          {i.text}
+          {i.hint && <span className="sr-only"> — {i.hint}</span>}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -7,6 +7,7 @@ import { PGlite } from "@electric-sql/pglite";
 // Supabase에만 있는 auth.uid()·auth.users·authenticated/anon 역할은 아래에서 흉내 낸다.
 
 const MIGRATION = readFileSync(new URL("../supabase/migrations/20261030000000_init.sql", import.meta.url), "utf8");
+const INVENTORY_MIGRATION = readFileSync(new URL("../supabase/migrations/20261116000000_inventory.sql", import.meta.url), "utf8");
 const ALICE = "11111111-1111-1111-1111-111111111111";
 const BOB = "22222222-2222-2222-2222-222222222222";
 
@@ -27,6 +28,7 @@ before(async () => {
     insert into auth.users (id) values ('${ALICE}'), ('${BOB}');
   `);
   await db.exec(MIGRATION);
+  await db.exec(INVENTORY_MIGRATION);
 });
 
 after(async () => {
@@ -198,4 +200,55 @@ test("앱이 만드는 저장 레코드(toRecord)는 DB 제약을 그대로 통�
   );
   assert.equal(rows[0].reagents[0].name, "Tris-HCl");
   assert.equal(rows[0].results.weighing[0].text, "1.970 g"); // 0.05 M × 0.1 L × 157.6 g/mol × 2.5배, 유효숫자 4자리
+});
+
+// 보유 시약 테스트는 앞선 테스트가 계정을 지우는 것과 무관하게 새 사용자 둘로 한다
+const INV_A = "55555555-5555-5555-5555-555555555555";
+const INV_B = "66666666-6666-6666-6666-666666666666";
+
+test("보유 시약: 본인 것만 읽고 쓰며, 같은 이름은 한 번만 들어간다", async () => {
+  await db.exec(`insert into auth.users (id) values ('${INV_A}'), ('${INV_B}')`);
+  await as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2), ($3, $4)", ["nacl", "NaCl", "에탄올", "에탄올"]));
+  await as(INV_B, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["nacl", "Sodium chloride"]));
+
+  const mine = await as(INV_A, () => db.query("select key, name, user_id from public.inventory_items order by key"));
+  assert.deepEqual(mine.rows.map((r) => r.key), ["nacl", "에탄올"]);
+  assert.ok(mine.rows.every((r) => r.user_id === INV_A), "user_id 는 로그인한 사용자로 자동 채워진다");
+  const bobs = await as(INV_B, () => db.query("select name from public.inventory_items"));
+  assert.deepEqual(bobs.rows.map((r) => r.name), ["Sodium chloride"]);
+
+  // 앱이 쓰는 upsert(ignoreDuplicates)는 같은 key 를 조용히 건너뛴다
+  await as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2) on conflict (user_id, key) do nothing", ["nacl", "다른 이름"]));
+  const still = await as(INV_A, () => db.query("select name from public.inventory_items where key = $1", ["nacl"]));
+  assert.equal(still.rows[0].name, "NaCl");
+  // 키를 직접 넣어 중복하면 거부
+  await assert.rejects(() => as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["nacl", "x"])), /duplicate key/);
+});
+
+test("보유 시약: 남의 것은 지우거나 남의 이름으로 넣을 수 없고, anon 은 접근할 수 없다", async () => {
+  const del = await as(INV_B, () => db.query("delete from public.inventory_items where key = $1 returning key", ["에탄올"]));
+  assert.equal(del.rows.length, 0, "밥은 앨리스의 시약을 지울 수 없다");
+  await assert.rejects(
+    () => as(INV_B, () => db.query("insert into public.inventory_items (user_id, key, name) values ($1, $2, $3)", [INV_A, "kcl", "KCl"])),
+    /row-level security/,
+  );
+  await db.exec("set role anon");
+  await assert.rejects(() => db.query("select * from public.inventory_items"), /permission denied/);
+  await db.exec("reset role");
+  // 본인 것은 하나씩, 전체로 지울 수 있다 (앱의 clearInventory 와 같은 조건)
+  const one = await as(INV_A, () => db.query("delete from public.inventory_items where key = $1 returning key", ["에탄올"]));
+  assert.equal(one.rows.length, 1);
+  const all = await as(INV_A, () => db.query("delete from public.inventory_items where key <> $1 returning key", [""]));
+  assert.equal(all.rows.length, 1);
+  const left = await as(INV_B, () => db.query("select count(*)::int as n from public.inventory_items"));
+  assert.equal(left.rows[0].n, 1, "밥의 목록은 그대로");
+});
+
+test("보유 시약: 값 검증과 사용자당 2000개 제한", async () => {
+  await assert.rejects(() => as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["", "x"])), /check/);
+  await assert.rejects(() => as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["k", "x".repeat(121)])), /check/);
+  await as(INV_A, () => db.query("insert into public.inventory_items (key, name) select 'k' || g, '시약' || g from generate_series(1, 2000) g"));
+  await assert.rejects(() => as(INV_A, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["one-more", "하나 더"])), /저장 한도/);
+  await as(INV_B, () => db.query("insert into public.inventory_items (key, name) values ($1, $2)", ["bob-ok", "밥은 영향 없음"]));
+  await as(INV_A, () => db.query("delete from public.inventory_items where key <> $1", [""]));
 });

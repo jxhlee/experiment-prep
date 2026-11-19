@@ -3,48 +3,26 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { computeRow, formatAmount, mergeResults, namesNeedingLookup, normalizeName, scaleResult } from "../../lib/chem.mjs";
+import { analyzeReagent, analyzeStep } from "../../lib/provenance.mjs";
+import { reagentIssues } from "../../lib/row-issues.mjs";
 import { buildNarrative, buildTimeline, formatMinutes } from "../../lib/timeline.mjs";
 import { ScaleControl, SigFigsControl } from "../controls";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
 import MwPicker from "../MwPicker";
-import { formCandidates, matchForm } from "../../lib/forms.mjs";
-import { analyzeReagent, analyzeStep } from "../../lib/provenance.mjs";
-import SaveCard from "../SaveCard";
-import { Card, CardTitle, EmptyState, PageHeader, Segmented, Stat, TabPanel, Tabs, buttonClass } from "../ui";
+import SaveControl from "../SaveControl";
+import { Card, Disclosure, EmptyState, IssueList, PageHeader, Segmented, TabPanel, Tabs, buttonClass } from "../ui";
 import DisposalPanel from "./DisposalPanel";
-import { EvidenceDetails, ExistenceChip, ProvenanceSummary } from "./Provenance";
+import { EvidenceQuote } from "./Provenance";
 import { focusSoon } from "./focus";
 import Stepper from "./Stepper";
 import Timeline from "./Timeline";
-
-function Notes({ notes }) {
-  return notes.map((n) => (
-    <p key={n} className="mt-1.5 flex gap-1.5 rounded-md bg-warn-soft px-2 py-1 text-sm text-warn-ink">
-      <Icon name="info" size={14} className="mt-1" />
-      <span>{n}</span>
-    </p>
-  ));
-}
-
-/** 같은 시약에 다른 형태(무수물·수화물)가 있으면, 지금 어느 형태 기준인지 알려 준다 */
-function FormHint({ name, mw }) {
-  const family = formCandidates(name);
-  if (!family) return null;
-  const at = matchForm(family.forms, mw);
-  return (
-    <p className="mt-1 text-sm text-ink-muted">
-      <span className="font-medium text-ink">{family.forms.length}가지 형태</span>가 있는 시약이에요. 지금은{" "}
-      <span className="font-medium text-ink">{at >= 0 ? family.forms[at].label : `분자량 ${mw}`}</span> 기준이에요. 시약병 라벨의 형태를 확인하세요.
-    </p>
-  );
-}
 
 export default function StepResult() {
   const {
     reagents, timeline, mwMap, sigFigs, setSigFigs, scaleFactor, setScaleFactor,
     auth, setMw, prepareResults, isCalculating, markReached, hasWork, hydrated,
-    methodText, reagentInfo, checkReagents,
+    methodText, reagentInfo, checkReagents, inventoryIndex,
   } = useExperiment();
   const [tab, setTab] = useState("table");
   const [mergeMode, setMergeMode] = useState(false);
@@ -95,7 +73,7 @@ export default function StepResult() {
 
   if (hydrated && !hasWork) {
     return (
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-6">
         <PageHeader title="계산 결과" />
         <Card>
           <EmptyState
@@ -115,51 +93,40 @@ export default function StepResult() {
   }
 
   const loading = isCalculating && needsLookup;
+  const summary = [`시약 ${reagents.length}개`, `실험 규모 ×${scaleFactor}`, tl.items.length > 0 ? `총 소요 시간 ${formatMinutes(tl.totalMin)}` : null].filter(Boolean).join(" · ");
 
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader title="계산 결과" description="시약별 계량값과 실행 순서를 확인하세요. 규모와 유효숫자는 오른쪽에서 바로 바꿀 수 있어요." />
+    <div className="flex flex-col gap-6">
+      <PageHeader title="계산 결과" description={summary} actions={<SaveControl />} />
       <Stepper step={3} />
 
-      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          ["시약", `${reagents.length}개`, "beaker"],
-          ["실험 규모", `×${scaleFactor}`, "layers"],
-          ["유효숫자", `${sigFigs}자리`, "calculator"],
-          ["총 소요 시간", tl.items.length > 0 ? formatMinutes(tl.totalMin) : "—", "clock"],
-        ].map(([term, value, icon]) => (
-          <li key={term}>
-            <Stat label={term} value={value} icon={icon} />
-          </li>
-        ))}
-      </ul>
-
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <Card className="min-w-0">
+      <Card flush>
+        <div className="p-5">
           <Tabs
             label="결과 보기"
             idPrefix="result"
             value={tab}
             onChange={setTab}
             tabs={[
-              { id: "table", label: "계량 준비표", icon: "table", count: reagents.length },
-              { id: "timeline", label: "타임라인", icon: "clock", count: tl.items.length },
-              { id: "disposal", label: "폐기·안전", icon: "alert" },
+              { id: "table", label: "계량 준비표", count: reagents.length },
+              { id: "timeline", label: "타임라인", count: tl.items.length },
+              { id: "disposal", label: "폐기·안전" },
             ]}
           />
 
-          <TabPanel idPrefix="result" id="table" value={tab} className="pt-4">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <p className="max-w-md text-sm text-ink-muted">
-                시약별로 몇 g 혹은 몇 mL를 달아야 하는지 보여 줘요. 「통합」은 같은 시약을 한 줄로 합쳐요.
-              </p>
+          <TabPanel idPrefix="result" id="table" value={tab} className="pt-5">
+            <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
+              <div className="w-full sm:w-64">
+                <ScaleControl id="scale-result" value={scaleFactor} onChange={setScaleFactor} />
+              </div>
+              <SigFigsControl id="sig-result" value={sigFigs} onChange={setSigFigs} />
               <Segmented
                 legend="표 보기 방식"
                 hideLegend
                 name="merge-mode"
                 value={mergeMode ? "merged" : "each"}
                 onChange={(v) => setMergeMode(v === "merged")}
-                className="w-full sm:w-48"
+                className="w-full sm:ml-auto sm:w-40"
                 options={[
                   { value: "each", label: "개별" },
                   { value: "merged", label: "통합" },
@@ -168,155 +135,137 @@ export default function StepResult() {
             </div>
 
             {loading ? (
-              <p role="status" className="mt-4 rounded-lg border border-dashed border-line-strong p-6 text-center text-sm text-ink-muted">
+              <p role="status" className="mt-5 py-8 text-center text-sm text-ink-muted">
                 시약의 분자량을 조회하는 중이에요…
               </p>
             ) : (
-              <div className="mt-3 overflow-hidden rounded-lg border border-line">
-                <table className="w-full border-collapse text-left text-sm">
-                  <caption className="sr-only">
-                    계량 준비표, {mergeMode ? "같은 시약을 합친 보기" : "시약별 보기"}, 실험 규모 {scaleFactor}배
-                  </caption>
-                  <thead className="bg-surface-2 text-ink-muted">
+              <table className="mt-5 w-full border-collapse text-left text-sm">
+                <caption className="sr-only">
+                  계량 준비표, {mergeMode ? "같은 시약을 합친 보기" : "시약별 보기"}, 실험 규모 {scaleFactor}배
+                </caption>
+                <thead className="border-b border-line text-ink-muted">
+                  <tr>
+                    <th scope="col" className="w-2/5 py-2 pr-4 font-normal sm:w-1/3">
+                      시약
+                    </th>
+                    <th scope="col" className="py-2 font-normal">
+                      {mergeMode ? "총 필요량" : "계량값"}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {rows.length === 0 && (
                     <tr>
-                      <th scope="col" className="px-4 py-2.5 font-medium">
-                        시약
-                      </th>
-                      <th scope="col" className="px-4 py-2.5 font-medium">
-                        {mergeMode ? "총 필요량" : "계량값"}
-                      </th>
+                      <td colSpan={2} className="py-8 text-center text-ink-muted">
+                        시약이 없어요. 이전 단계에서 시약을 추가해 주세요.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {rows.length === 0 && (
-                      <tr>
-                        <td colSpan={2} className="px-4 py-6 text-center text-ink-muted">
-                          시약이 없어요. 이전 단계에서 시약을 추가해 주세요.
-                        </td>
-                      </tr>
-                    )}
-                    {mergeMode
-                      ? mergedRows.map((m) => (
-                          <tr key={`${m.name}-${m.dim}-${m.unitLabel ?? ""}`} className="border-t border-line align-top">
-                            <th scope="row" className="px-4 py-3 font-medium text-ink">
-                              {m.name}
-                              {m.rows > 1 && <span className="ml-1.5 text-sm font-normal text-accent">({m.rows}곳 합산)</span>}
-                            </th>
-                            <td className="px-4 py-3 text-[15px] font-semibold tabular-nums text-ink">{formatAmount(m, sigFigs)}</td>
-                          </tr>
-                        ))
-                      : rows.map((r, idx) => (
-                          <tr key={r.id} className="border-t border-line align-top">
+                  )}
+                  {mergeMode
+                    ? mergedRows.map((m) => (
+                        <tr key={`${m.name}-${m.dim}-${m.unitLabel ?? ""}`} className="align-top">
+                          <th scope="row" className="py-3 pr-4 font-medium text-ink">
+                            {m.name}
+                            {m.rows > 1 && <span className="ml-1.5 text-sm font-normal text-ink-muted">({m.rows}곳 합산)</span>}
+                          </th>
+                          <td className="py-3 text-[17px] font-semibold tabular-nums text-ink">{formatAmount(m, sigFigs)}</td>
+                        </tr>
+                      ))
+                    : rows.map((r, idx) => {
+                        const a = rowAnalysis[idx];
+                        const issues = reagentIssues({ name: r.name, analysis: a, info: reagentInfo[normalizeName(r.name).key], inventoryIndex });
+                        const needsDetail = r.res.ok && (r.res.notes.length > 0 || a?.overall === "ai");
+                        return (
+                          <tr key={r.id} className="align-top">
                             <th
                               scope="row"
                               id={`result-row-${r.id}`}
                               tabIndex={-1}
-                              className="px-4 py-3 font-medium text-ink focus:outline-none focus-visible:outline-2"
+                              className="py-3 pr-4 font-medium text-ink focus:outline-none focus-visible:outline-2"
                             >
                               {r.name || "(이름 없음)"}
                             </th>
-                            <td className="px-4 py-3">
+                            <td className="py-3">
                               {r.res.ok ? (
                                 <>
-                                  <span className="block text-[15px] font-semibold tabular-nums text-ink">{formatAmount(r.res, sigFigs)}</span>
+                                  <span className="block text-[17px] font-semibold tabular-nums text-ink">{formatAmount(r.res, sigFigs)}</span>
                                   <span className="mt-0.5 block text-sm text-ink-muted">
                                     {r.res.basis}
                                     {scaleText}
                                   </span>
-                                  <Notes notes={r.res.notes} />
-                                  {r.res.mw != null && <FormHint name={r.name} mw={r.res.mw} />}
-                                  {r.res.mw != null && (
-                                    <MwPicker name={r.name} currentMw={r.res.mw} loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
-                                  )}
                                 </>
                               ) : (
-                                <>
-                                  <p className="flex gap-1.5 font-medium text-danger">
-                                    <Icon name="alert" size={16} className="mt-0.5" />
-                                    <span>
-                                      <span className="sr-only">계산할 수 없어요: </span>
-                                      {r.res.reason}
-                                    </span>
-                                  </p>
-                                  {r.res.code === "not-found" && (
-                                    <MwPicker name={r.name} notFound loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
-                                  )}
-                                </>
+                                <p className="flex gap-1.5 font-medium text-danger">
+                                  <Icon name="alert" size={16} className="mt-0.5" />
+                                  <span>
+                                    <span className="sr-only">계산할 수 없어요: </span>
+                                    {r.res.reason}
+                                  </span>
+                                </p>
                               )}
-                              {r.name.trim() && (
-                                <div className="mt-2 flex flex-col gap-1.5">
-                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                                    <ProvenanceSummary analysis={rowAnalysis[idx]} />
-                                    <ExistenceChip name={r.name} info={reagentInfo[normalizeName(r.name).key]} />
+                              <IssueList issues={issues} className="mt-1.5" />
+                              {r.res.ok && r.res.mw != null && (
+                                <MwPicker name={r.name} currentMw={r.res.mw} loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
+                              )}
+                              {!r.res.ok && r.res.code === "not-found" && (
+                                <MwPicker name={r.name} notFound loggedIn={Boolean(auth.user)} onApply={(mw, form) => applyMw(r, mw, form)} />
+                              )}
+                              {needsDetail && (
+                                <Disclosure summary={r.res.notes.length > 0 && a ? "참고 · 원문 근거" : r.res.notes.length > 0 ? "참고" : "원문 근거"}>
+                                  <div className="flex flex-col gap-2">
+                                    {r.res.notes.map((n) => (
+                                      <p key={n}>· {n}</p>
+                                    ))}
+                                    {a && <EvidenceQuote evidence={a.evidence} />}
                                   </div>
-                                  {rowAnalysis[idx] && <EvidenceDetails evidence={rowAnalysis[idx].evidence} />}
-                                </div>
+                                </Disclosure>
                               )}
                             </td>
                           </tr>
-                        ))}
-                  </tbody>
-                </table>
-              </div>
+                        );
+                      })}
+                </tbody>
+              </table>
             )}
             {mergeMode && skipped.length > 0 && (
-              <p className="mt-3 flex gap-1.5 rounded-lg bg-warn-soft px-3 py-2 text-sm text-warn-ink">
-                <Icon name="alert" size={16} className="mt-0.5" />
-                <span>
-                  계산할 수 없어 합산에서 제외됨: {skipped.map((s) => s.name || "(이름 없음)").join(", ")} — 「개별」에서 사유를 확인하세요.
-                </span>
+              <p className="mt-3 text-sm text-ink-muted">
+                계산할 수 없어 합산에서 제외됨: {skipped.map((s) => s.name || "(이름 없음)").join(", ")} — 「개별」에서 사유를 확인하세요.
               </p>
             )}
           </TabPanel>
 
-          <TabPanel idPrefix="result" id="timeline" value={tab} className="flex flex-col gap-6 pt-4">
+          <TabPanel idPrefix="result" id="timeline" value={tab} className="flex flex-col gap-8 pt-5">
             <Timeline tl={tl} prov={stepProv} />
             <section aria-labelledby="narrative-heading">
-              <CardTitle id="narrative-heading" icon="list">
+              <h2 id="narrative-heading" className="text-[15px] font-semibold text-ink">
                 진행 설명
-              </CardTitle>
-              <div className="mt-3 flex flex-col gap-2.5 rounded-lg bg-surface-2 p-4 text-sm leading-relaxed text-ink">
-                {narrative.length === 0 ? (
-                  <p>설명할 단계가 없어요. 이전 단계에서 실행 단계를 추가해 주세요.</p>
-                ) : (
-                  narrative.map((line, i) => (
-                    <p key={i} className={i === narrative.length - 1 ? "font-semibold" : undefined}>
+              </h2>
+              {narrative.length === 0 ? (
+                <p className="mt-2 text-sm text-ink-muted">설명할 단계가 없어요. 이전 단계에서 실행 단계를 추가해 주세요.</p>
+              ) : (
+                <ol className="mt-2 flex flex-col gap-2 text-sm leading-relaxed text-ink">
+                  {narrative.map((line, i) => (
+                    <li key={i} className={i === narrative.length - 1 ? "font-semibold" : "text-ink-muted"}>
                       {line}
-                    </p>
-                  ))
-                )}
-              </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </section>
           </TabPanel>
-        
-          <TabPanel idPrefix="result" id="disposal" value={tab} className="pt-4">
+
+          <TabPanel idPrefix="result" id="disposal" value={tab} className="pt-5">
             {tab === "disposal" && <DisposalPanel />}
           </TabPanel>
-        </Card>
-
-        <div className="flex flex-col gap-5">
-          <Card as="section" aria-labelledby="adjust-title">
-            <CardTitle id="adjust-title" icon="calculator">
-              결과 조정
-            </CardTitle>
-            <p className="mt-0.5 text-sm text-ink-muted">바꾸면 표와 설명이 바로 달라져요.</p>
-            <div className="mt-3 flex flex-col gap-5">
-              <ScaleControl id="scale-result" value={scaleFactor} onChange={setScaleFactor} />
-              <SigFigsControl id="sig-result" value={sigFigs} onChange={setSigFigs} />
-            </div>
-          </Card>
-          <SaveCard />
         </div>
-      </div>
+      </Card>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
-        <Link href="/new/review" className={buttonClass({ variant: "secondary" })}>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <Link href="/new/review" className={buttonClass({ variant: "ghost" })}>
           <Icon name="arrowLeft" size={16} />
           확인·수정으로
         </Link>
-        <Link href="/" className={buttonClass({ variant: "ghost" })}>
-          홈으로
-        </Link>
+        <p className="max-w-md text-sm text-ink-muted">AI가 읽은 값은 틀릴 수 있어요. 실험 전에 논문 원문과 꼭 대조해 주세요.</p>
       </div>
     </div>
   );

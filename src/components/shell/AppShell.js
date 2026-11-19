@@ -35,7 +35,7 @@ export default function AppShell({ children }) {
         <Sidebar />
         <div className="flex min-w-0 flex-col">
           <Topbar />
-          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 pb-28 focus:outline-none sm:px-6 lg:px-8 lg:pb-12">
+          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 pb-28 focus:outline-none sm:px-6 lg:px-8 lg:pb-12">
             {children}
           </main>
         </div>

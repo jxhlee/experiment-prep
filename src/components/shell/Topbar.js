@@ -14,7 +14,8 @@ const CRUMBS = {
   "/new/review": ["새 실험", "추출 결과 확인"],
   "/new/result": ["새 실험", "결과"],
   "/experiments": ["내 실험"],
-  "/reagents": ["내 시약"],
+  "/reagents": ["분자량 기록"],
+  "/inventory": ["보유 시약"],
   "/help": ["도움말"],
 };
 

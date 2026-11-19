@@ -1,15 +1,19 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { clearDraft, loadDraft, saveDraft, sessionStore } from "../lib/draft.mjs";
 import { findEntry, isMixtureName, namesNeedingLookup, normalizeName } from "../lib/chem.mjs";
 import { getSupabase } from "../lib/supabase";
 import { defaultTitle, fromRecord, toRecord } from "../lib/experiments.mjs";
 import {
+  addInventory,
+  clearInventory,
   deleteExperiment,
+  deleteInventoryItem,
   friendlyDbError,
   libraryToMwMap,
   listExperiments,
+  listInventory,
   listUserReagents,
   loadExperiment,
   mergeLibrary,
@@ -24,6 +28,8 @@ import {
   loadCachedExtraction,
   saveCachedExtraction,
 } from "../lib/extract-client.mjs";
+import { MAX_INVENTORY, buildInventoryIndex } from "../lib/inventory.mjs";
+import { loadLocalInventory, localStore, saveLocalInventory } from "../lib/inventory-store.mjs";
 import { useSessionPref } from "../lib/use-session-pref";
 import { useAccount } from "./AuthProvider";
 
@@ -32,6 +38,8 @@ const ExperimentContext = createContext(null);
 const AUTOSAVE_MS = 400;
 const emptyRow = (id) => ({ id, name: "", concentration: "", volume: "" });
 const EMPTY_LIST = { items: [], loading: false, error: "", loaded: false };
+const EMPTY_INVENTORY = { items: [], loaded: false, error: "", source: "local" };
+const byName = (a, b) => a.name.localeCompare(b.name, "ko");
 
 /**
  * 한 번의 실험 준비(입력 → 확인 → 결과)에 필요한 모든 상태와 동작을 한곳에 둔다.
@@ -66,6 +74,9 @@ export function ExperimentProvider({ children }) {
   // 시약마다 PubChem 에서 확인한 결과(이름 키로 보관)와, 다른 형태(수화물) 후보를 찾은 결과
   const [reagentInfo, setReagentInfo] = useState({});
   const [formProbe, setFormProbe] = useState({});
+  // 보유 시약 목록(우리 학교·연구실에 있는 시약). 로그인하면 계정에, 아니면 이 브라우저에 저장한다.
+  const [inventory, setInventory] = useState(EMPTY_INVENTORY);
+  const [localInventoryCount, setLocalInventoryCount] = useState(0);
 
   const rowIdRef = useRef(1);
   const stepIdRef = useRef(0);
@@ -77,7 +88,7 @@ export function ExperimentProvider({ children }) {
 
   // 동작들이 항상 최신 값을 읽도록 매 렌더 뒤에 갱신한다 (동작 함수는 모양이 바뀌지 않게 둔다)
   useEffect(() => {
-    latest.current = { methodText, scaleFactor, sigFigs, reagents, timeline, mwMap, apiMode, apiKey, saveTitle, currentId, user: auth.user, userId };
+    latest.current = { methodText, scaleFactor, sigFigs, reagents, timeline, mwMap, apiMode, apiKey, saveTitle, currentId, user: auth.user, userId, inventory };
   });
 
   const notify = useCallback((message) => setLiveMessage(message), []);
@@ -365,6 +376,92 @@ export function ExperimentProvider({ children }) {
     }
   }, []);
 
+  // 로그인 상태에 따라 보유 시약 목록을 불러온다 (로그인 전에는 이 브라우저, 로그인 후에는 계정)
+  const authReady = auth.ready;
+  useEffect(() => {
+    if (!authReady) return;
+    let active = true;
+    const local = loadLocalInventory(localStore());
+    Promise.resolve().then(() => {
+      if (!active) return;
+      setLocalInventoryCount(local.length);
+      if (!userId) setInventory({ items: local, loaded: true, error: "", source: "local" });
+    });
+    if (userId) {
+      listInventory(getSupabase())
+        .then((rows) => active && setInventory({ items: [...rows].sort(byName), loaded: true, error: "", source: "account" }))
+        .catch((err) => active && setInventory({ items: [], loaded: true, error: friendlyDbError(err), source: "account" }));
+    }
+    return () => {
+      active = false;
+    };
+  }, [authReady, userId]);
+
+  const inventoryIndex = useMemo(() => buildInventoryIndex(inventory.items), [inventory.items]);
+
+  /** 보유 시약 추가. 이미 있는 이름은 건너뛴다. 결과: { added, existed } 또는 { error } */
+  const addInventoryItems = useCallback(async (items) => {
+    const { inventory: inv, userId: uid } = latest.current;
+    const have = new Set(inv.items.map((i) => i.key));
+    const fresh = items.filter((i, at) => !have.has(i.key) && items.findIndex((x) => x.key === i.key) === at);
+    if (fresh.length === 0) return { added: 0, existed: items.length };
+    if (inv.items.length + fresh.length > MAX_INVENTORY) {
+      return { error: `보유 시약은 ${MAX_INVENTORY.toLocaleString("ko-KR")}개까지 저장할 수 있어요.` };
+    }
+    const next = [...inv.items, ...fresh].sort(byName);
+    try {
+      if (uid) await addInventory(getSupabase(), uid, fresh);
+      else if (!saveLocalInventory(localStore(), next)) throw new Error("local");
+    } catch (err) {
+      return { error: uid ? friendlyDbError(err) : "이 브라우저에 저장하지 못했어요. 저장 공간이 막혀 있을 수 있어요." };
+    }
+    setInventory({ items: next, loaded: true, error: "", source: uid ? "account" : "local" });
+    if (!uid) setLocalInventoryCount(next.length);
+    notify(`보유 시약 ${fresh.length}개를 추가했어요.`);
+    return { added: fresh.length, existed: items.length - fresh.length };
+  }, [notify]);
+
+  const removeInventoryItem = useCallback(async (key) => {
+    const { inventory: inv, userId: uid } = latest.current;
+    const next = inv.items.filter((i) => i.key !== key);
+    try {
+      if (uid) await deleteInventoryItem(getSupabase(), key);
+      else if (!saveLocalInventory(localStore(), next)) throw new Error("local");
+    } catch (err) {
+      return { error: uid ? friendlyDbError(err) : "이 브라우저에 저장하지 못했어요." };
+    }
+    setInventory({ items: next, loaded: true, error: "", source: uid ? "account" : "local" });
+    if (!uid) setLocalInventoryCount(next.length);
+    notify("보유 시약에서 지웠어요.");
+    return {};
+  }, [notify]);
+
+  const clearInventoryItems = useCallback(async () => {
+    const { userId: uid } = latest.current;
+    try {
+      if (uid) await clearInventory(getSupabase());
+      else if (!saveLocalInventory(localStore(), [])) throw new Error("local");
+    } catch (err) {
+      return { error: uid ? friendlyDbError(err) : "이 브라우저에 저장하지 못했어요." };
+    }
+    setInventory({ items: [], loaded: true, error: "", source: uid ? "account" : "local" });
+    if (!uid) setLocalInventoryCount(0);
+    notify("보유 시약을 모두 지웠어요.");
+    return {};
+  }, [notify]);
+
+  /** 로그인 전에 이 브라우저에 보관해 둔 목록을 계정으로 옮긴다 */
+  const importLocalInventory = useCallback(async () => {
+    if (!latest.current.userId) return { error: "로그인한 뒤에 옮길 수 있어요." };
+    const local = loadLocalInventory(localStore());
+    const result = await addInventoryItems(local);
+    if (!result.error) {
+      saveLocalInventory(localStore(), []);
+      setLocalInventoryCount(0);
+    }
+    return result;
+  }, [addInventoryItems]);
+
   const loadExperiments = useCallback(async () => {
     setExperiments((s) => ({ ...s, loading: true, error: "" }));
     try {
@@ -470,6 +567,8 @@ export function ExperimentProvider({ children }) {
     setMw,
     reagentInfo, checkReagents,
     formProbe, probeForms,
+    inventory, inventoryIndex, localInventoryCount,
+    addInventoryItems, removeInventoryItem, clearInventoryItems, importLocalInventory,
     resetWork,
     // 저장
     saveTitle, setSaveTitle, currentId, saveStatus, save,
