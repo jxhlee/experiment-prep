@@ -18,7 +18,7 @@ const sample = {
   sigFigs: 4,
   saveTitle: "내 실험",
   reagents: [{ id: 3, name: "NaCl", concentration: "150 mM", volume: "100 mL" }],
-  timeline: [{ id: 5, label: "배양", duration: "30 min", repeat: 1, details: "얼음 위", isWaiting: true }],
+  timeline: [{ id: 5, label: "배양", duration: "30 min", repeat: 1, details: "얼음 위", isWaiting: true, reagentIds: [] }],
   mwMap: { sodiumpyruvate: { mw: 110.04, formula: "C3H3NaO3", source: "pubchem" }, zzz: { notFound: true } },
   analysisMeta: { fromCache: false, model: "gemini-3.5-flash-lite" },
 };
@@ -81,7 +81,7 @@ test("복원할 때 값을 다듬는다 (이상한 값이 화면 상태로 새�
   assert.equal(d.sigFigs, 6);
   assert.equal(d.saveTitle.length, 120);
   assert.deepEqual(d.reagents, [{ id: 1, name: "", concentration: "", volume: "" }, { id: 2, name: "", concentration: "", volume: "" }]);
-  assert.deepEqual(d.timeline[0], { id: 1, label: "", duration: "", repeat: 1, details: "", isWaiting: true });
+  assert.deepEqual(d.timeline[0], { id: 1, label: "", duration: "", repeat: 1, details: "", isWaiting: true, reagentIds: [] });
   assert.deepEqual(Object.keys(d.mwMap).sort(), ["good", "nf"]);
   assert.equal(d.analysisMeta, null);
 });
@@ -92,4 +92,18 @@ test("복원한 뒤에는 지울 수 있다", () => {
   clearDraft(s);
   assert.equal(loadDraft(s), null);
   assert.doesNotThrow(() => clearDraft(null));
+});
+
+test("단계-시약 연결과 직접 추가 표시는 임시 보관본에도 남고, 이상한 값은 걸러진다", () => {
+  const s = fakeStorage();
+  saveDraft(s, {
+    ...sample,
+    reagents: [{ id: 3, name: "NaCl", concentration: "", volume: "", userAdded: true }, { id: 4, name: "HCl", concentration: "", volume: "" }],
+    timeline: [{ id: 5, label: "첨가", duration: "", repeat: 1, details: "", isWaiting: false, reagentIds: [3, 4, 3, "x", null, 1.5], userAdded: true }],
+  });
+  const d = loadDraft(s);
+  assert.deepEqual(d.timeline[0].reagentIds, [3, 4]);
+  assert.equal(d.timeline[0].userAdded, true);
+  assert.equal(d.reagents[0].userAdded, true);
+  assert.equal(Object.hasOwn(d.reagents[1], "userAdded"), false);
 });

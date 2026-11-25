@@ -16,6 +16,9 @@ export function sessionStore() {
 const str = (v, max = 100000) => (typeof v === "string" ? v.slice(0, max) : "");
 const num = (v, fallback) => (Number.isFinite(v) ? v : fallback);
 
+/** 단계가 쓰는 시약 줄 id 목록: 숫자만, 중복 없이, 너무 길면 자른다 */
+const idList = (v) => (Array.isArray(v) ? [...new Set(v.filter((n) => Number.isInteger(n)))].slice(0, 200) : []);
+
 function cleanMwMap(map) {
   const out = {};
   if (!map || typeof map !== "object") return out;
@@ -45,6 +48,7 @@ function clean(d) {
       name: str(r?.name, 200),
       concentration: str(r?.concentration, 100),
       volume: str(r?.volume, 100),
+      ...(r?.userAdded ? { userAdded: true } : {}),
     })),
     timeline: d.timeline.slice(0, MAX_ROWS).map((s, i) => ({
       id: num(s?.id, i + 1),
@@ -53,6 +57,8 @@ function clean(d) {
       repeat: s?.repeat ?? 1,
       details: str(s?.details, 300),
       isWaiting: Boolean(s?.isWaiting),
+      reagentIds: idList(s?.reagentIds),
+      ...(s?.userAdded ? { userAdded: true } : {}),
     })),
     mwMap: cleanMwMap(d.mwMap),
     analysisMeta:

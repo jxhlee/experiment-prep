@@ -210,7 +210,8 @@ export function Tabs({ label, idPrefix, tabs, value, onChange }) {
   };
 
   return (
-    <div role="tablist" aria-label={label} className="flex gap-5 border-b border-line">
+    // 탭이 많아 좁은 화면에 다 안 들어가면 이름을 꺾지 말고 줄 전체를 가로로 스크롤한다
+    <div role="tablist" aria-label={label} className="flex gap-5 overflow-x-auto border-b border-line [scrollbar-width:thin]">
       {tabs.map((tab, i) => {
         const selected = tab.id === value;
         return (
@@ -224,7 +225,7 @@ export function Tabs({ label, idPrefix, tabs, value, onChange }) {
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(tab.id)}
             onKeyDown={(e) => onKeyDown(e, i)}
-            className={`-mb-px inline-flex min-h-10 items-center gap-2 border-b-2 px-0.5 text-sm font-medium pointer-coarse:min-h-11 ${
+            className={`-mb-px inline-flex min-h-10 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-0.5 text-sm font-medium pointer-coarse:min-h-11 ${
               selected ? "border-ink text-ink" : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >

@@ -23,9 +23,33 @@ test("parseExtraction: 공백 제거, 반복 횟수 보정, 배열이 아니면 
     }),
   );
   assert.deepEqual(r.reagents, [{ name: "NaCl", concentration: "150 mM", volume: "100 mL" }]);
-  assert.deepEqual(r.steps[0], { label: "배양", duration: "30 min", repeat: 1, details: "", isWaiting: true });
+  assert.deepEqual(r.steps[0], { label: "배양", duration: "30 min", repeat: 1, details: "", isWaiting: true, reagentRefs: [] });
   assert.equal(r.steps[1].repeat, 3);
   assert.deepEqual(parseExtraction(respond({ reagents: "x", steps: null })), { reagents: [], steps: [] });
+});
+
+test("parseExtraction: 단계가 쓰는 시약 번호는 정수·범위 안·중복 없이만 받는다", () => {
+  const r = parseExtraction(
+    respond({
+      reagents: [{ name: "A" }, { name: "B" }, { name: "C" }],
+      steps: [
+        { label: "첨가", reagentRefs: [0, 2, 2, "1", 3, -1, 1.5, null, "x"] },
+        { label: "교반", reagentRefs: "0" },
+        { label: "여과" },
+      ],
+    }),
+  );
+  assert.deepEqual(r.steps[0].reagentRefs, [0, 2, 1]);
+  assert.deepEqual(r.steps[1].reagentRefs, []);
+  assert.deepEqual(r.steps[2].reagentRefs, []);
+});
+
+test("프롬프트: 시간 없는 조작도 단계로 넣고, 시약을 단계에 연결하고, 사이클은 묶으라고 안내한다", () => {
+  const prompt = buildRequestBody("x").contents[0].parts[0].text;
+  assert.match(prompt, /시간이 없다고 건너뛰지 마라/);
+  assert.match(prompt, /reagentRefs/);
+  assert.match(prompt, /N번 반복/);
+  assert.match(prompt, /양이나 농도가 적혀 있지 않아도 이름만으로 넣는다/);
 });
 
 test("parseExtraction: 추론(thought) 부분은 무시하고, 해석 못 하면 bad-response", () => {

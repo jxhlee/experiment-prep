@@ -1,27 +1,13 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { normalizeName } from "../../lib/chem.mjs";
-import { classifyReagent, findIncompatibilities } from "../../lib/hazard.mjs";
-import { KOSHA_MSDS_URL, existenceOf, pubchemSafetyUrl } from "../../lib/reagent-status.mjs";
+import { disposalItems, findIncompatibilities } from "../../lib/hazard.mjs";
+import { KOSHA_MSDS_URL, existenceOf, ghsNote, pubchemSafetyUrl } from "../../lib/reagent-status.mjs";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
 import { Badge, Disclosure } from "../ui";
 
 const TONE = { danger: "danger", warn: "warn", neutral: "neutral" };
-const ORDER = ["acid", "base", "metal", "cr6", "cyanide", "azide", "sulfide", "oxidizer", "org-halo", "org-nonhalo", "aqueous", "none", "unknown"];
-
-function ghsNote(item) {
-  const g = item.info?.ghs;
-  if (item.info?.ghsState === "error") return "유해성 정보를 가져오지 못했어요.";
-  if (item.info?.state === "checking" || !item.info || item.info.ghsState == null) return "";
-  if (!g) return "PubChem에 GHS 정보가 없어요.";
-  if (g.hazards.length === 0 && g.notHazardousShare != null && g.notHazardousShare >= 0.5) {
-    return `신고의 ${Math.round(g.notHazardousShare * 100)}%가 GHS 위험 물질이 아니라고 보고했어요.`;
-  }
-  if (g.hazards.length === 0) return "합의된 유해 분류가 없어요.";
-  return "";
-}
 
 /** 결과 화면의 「폐기·안전」 탭: 같이 버리면 안 되는 조합, 시약마다 어느 폐액에 모을지 */
 export default function DisposalPanel() {
@@ -33,20 +19,7 @@ export default function DisposalPanel() {
     checkReagents({ ghs: true });
   }, [checkReagents, namesSig]);
 
-  const items = useMemo(() => {
-    const seen = new Set();
-    const out = [];
-    for (const r of reagents) {
-      const name = r.name.trim();
-      const key = normalizeName(name).key;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      const info = reagentInfo[key];
-      out.push({ key, name, info, ...classifyReagent({ name, formula: info?.formula, ghs: info?.ghs }) });
-    }
-    return out.sort((a, b) => ORDER.indexOf(a.stream) - ORDER.indexOf(b.stream));
-  }, [reagents, reagentInfo]);
-
+  const items = useMemo(() => disposalItems(reagents, reagentInfo), [reagents, reagentInfo]);
   const warnings = useMemo(() => findIncompatibilities(items), [items]);
   const loading = items.some((i) => i.info?.state === "checking");
 
@@ -94,7 +67,7 @@ export default function DisposalPanel() {
         )}
         <ul className="mt-2 divide-y divide-line">
           {items.map((i) => {
-            const note = ghsNote(i);
+            const note = ghsNote(i.info);
             const notFound = existenceOf(i.name, i.info)?.kind === "notfound";
             return (
               <li key={i.key} className="py-3">

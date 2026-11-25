@@ -14,6 +14,7 @@ import CheckStrip from "./CheckStrip";
 import { EvidenceQuote } from "./Provenance";
 import { focusSoon } from "./focus";
 import Stepper from "./Stepper";
+import StepReagents from "./StepReagents";
 
 const COLS = "md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]";
 const label = "mb-0.5 block text-sm text-ink-muted";
@@ -40,24 +41,60 @@ export default function StepReview() {
     markReached(2);
   }, [markReached]);
 
+  // 시약 줄마다 그 시약을 쓰는 단계 번호 (AI 나 내가 연결해 둔 것)
+  const usedIn = useMemo(() => {
+    const map = new Map();
+    timeline.forEach((st, i) => (st.reagentIds ?? []).forEach((rid) => map.set(rid, [...(map.get(rid) ?? []), i + 1])));
+    return map;
+  }, [timeline]);
+  const anyLinks = usedIn.size > 0;
+
   const updateRow = (id, field, value) => setReagents((rows) => rows.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
   const addRow = () => {
     const id = newRowId();
-    setReagents((rows) => [...rows, { id, name: "", concentration: "", volume: "" }]);
+    setReagents((rows) => [...rows, { id, name: "", concentration: "", volume: "", userAdded: true }]);
     focusSoon(`reagent-name-${id}`);
   };
   const removeRow = (id, index) => {
     setReagents((rows) => rows.filter((r) => r.id !== id));
+    setTimeline((steps) => steps.map((st) => ({ ...st, reagentIds: (st.reagentIds ?? []).filter((rid) => rid !== id) })));
     notify(`시약 ${index + 1}번 줄을 삭제했어요.`);
     focusSoon("add-reagent");
   };
 
   const updateStep = (id, field, value) => setTimeline((steps) => steps.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+  const newStep = (id) => ({ id, label: "", duration: "", repeat: 1, details: "", isWaiting: false, reagentIds: [], userAdded: true });
   const addStep = () => {
     const id = newStepId();
-    setTimeline((steps) => [...steps, { id, label: "", duration: "", repeat: 1, details: "", isWaiting: false }]);
+    setTimeline((steps) => [...steps, newStep(id)]);
     focusSoon(`step-label-${id}`);
   };
+  // 중간에 빠진 단계를 넣을 수 있도록, 이 단계 바로 아래에 새 단계를 끼워 넣는다
+  const insertStepAfter = (index) => {
+    const id = newStepId();
+    setTimeline((steps) => [...steps.slice(0, index + 1), newStep(id), ...steps.slice(index + 1)]);
+    notify(`${index + 1}단계 아래에 새 단계를 넣었어요.`);
+    focusSoon(`step-label-${id}`);
+  };
+  const moveStep = (id, index, dir) => {
+    const to = index + dir;
+    if (to < 0 || to >= timeline.length) return;
+    setTimeline((steps) => {
+      const next = [...steps];
+      [next[index], next[to]] = [next[to], next[index]];
+      return next;
+    });
+    notify(`${index + 1}단계를 ${dir < 0 ? "위" : "아래"}로 옮겼어요. 이제 ${to + 1}단계예요.`);
+    focusSoon(`step-${dir < 0 ? "up" : "down"}-${id}`);
+  };
+  const toggleStepReagent = (stepId, reagentId) =>
+    setTimeline((steps) =>
+      steps.map((st) => {
+        if (st.id !== stepId) return st;
+        const has = (st.reagentIds ?? []).includes(reagentId);
+        return { ...st, reagentIds: has ? st.reagentIds.filter((x) => x !== reagentId) : [...(st.reagentIds ?? []), reagentId] };
+      }),
+    );
   const removeStep = (id, index) => {
     setTimeline((steps) => steps.filter((s) => s.id !== id));
     notify(`${index + 1}단계를 삭제했어요.`);
@@ -117,8 +154,10 @@ export default function StepReview() {
               {reagents.length === 0 && <li className="py-8 text-center text-sm text-ink-muted">시약이 없어요. 아래 버튼으로 추가해 주세요.</li>}
               {reagents.map((row, i) => {
                 const a = rowAnalysis[i];
-                const issues = reagentIssues({ name: row.name, analysis: a, info: reagentInfo[normalizeName(row.name).key], inventoryIndex });
+                const issues = reagentIssues({ name: row.name, analysis: a, info: reagentInfo[normalizeName(row.name).key], inventoryIndex, userAdded: row.userAdded });
                 const evId = `evidence-reagent-${row.id}`;
+                const stepsUsing = usedIn.get(row.id) ?? [];
+                const showUsage = row.name.trim() !== "" && (stepsUsing.length > 0 || anyLinks);
                 const open = Boolean(openEvidence[`r${row.id}`]);
                 return (
                   <li key={row.id} className="py-3">
@@ -177,9 +216,14 @@ export default function StepReview() {
                         <IconButton icon="trash" label={`${i + 1}번 줄 삭제`} onClick={() => removeRow(row.id, i)} />
                       </div>
                     </div>
-                    {(issues.length > 0 || (a && open)) && (
+                    {(issues.length > 0 || showUsage || (a && open)) && (
                       <div className="mt-2 flex flex-col gap-2 px-1">
                         <IssueList issues={issues} />
+                        {showUsage && (
+                          <p className={`text-sm ${stepsUsing.length > 0 ? "text-ink-muted" : "text-warn-ink"}`}>
+                            {stepsUsing.length > 0 ? `쓰는 단계: ${stepsUsing.map((n) => `${n}단계`).join(", ")}` : "어느 단계에서 쓰는지 연결하지 않았어요 (「실행 단계」에서 연결)"}
+                          </p>
+                        )}
                         {a && open && <EvidenceQuote id={evId} evidence={a.evidence} />}
                       </div>
                     )}
@@ -194,14 +238,17 @@ export default function StepReview() {
           </TabPanel>
 
           <TabPanel idPrefix="review" id="steps" value={tab} className="pt-4">
-            <p className="text-sm text-ink-muted">시간이 비어 있는 단계는 총 소요 시간에서 빠져요. 단계 이름은 AI가 한국어로 요약한 말이에요.</p>
+            <p className="text-sm text-ink-muted">
+              단계 순서가 곧 실험 과정이에요. 빠진 조작은 「아래에 단계 넣기」로 중간에 끼워 넣고, 「쓰는 시약」에서 그 단계에 쓰는 시약을 연결하면 결과의 과정 설명에 들어가요.
+              시간이 비어 있는 단계는 총 소요 시간에서 빠져요.
+            </p>
             <ol className="mt-2 divide-y divide-line">
               {timeline.length === 0 && <li className="py-8 text-center text-sm text-ink-muted">단계가 없어요. 아래 버튼으로 추가해 주세요.</li>}
               {timeline.map((s, i) => {
                 const a = stepAnalysis[i];
                 const evId = `evidence-step-${s.id}`;
                 const open = Boolean(openEvidence[`s${s.id}`]);
-                const issues = stepIssues({ analysis: a });
+                const issues = stepIssues({ analysis: a, userAdded: s.userAdded });
                 return (
                   <li key={s.id} className="py-3">
                     <div role="group" aria-label={`단계 ${i + 1}`} className="grid grid-cols-2 gap-x-4 gap-y-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_5rem_minmax(0,1.4fr)_auto] md:items-end">
@@ -240,13 +287,13 @@ export default function StepReview() {
                       </div>
                       <div className="col-span-2 min-w-0 md:col-span-1">
                         <label htmlFor={`step-details-${s.id}`} className={label}>
-                          조건
+                          내용·조건
                         </label>
                         <input
                           id={`step-details-${s.id}`}
                           value={s.details}
                           onChange={(e) => updateStep(s.id, "details", e.target.value)}
-                          placeholder="온도·속도 등"
+                          placeholder="온도·속도, 무엇을 어떻게"
                           autoComplete="off"
                           className={`${cellInputClass} ${aiLine(a?.details === "ai")}`}
                         />
@@ -265,9 +312,19 @@ export default function StepReview() {
                             onClick={() => toggleEvidence(`s${s.id}`)}
                           />
                         )}
+                        <IconButton id={`step-up-${s.id}`} icon="arrowUp" label={`${i + 1}단계를 위로`} aria-disabled={i === 0} onClick={() => i > 0 && moveStep(s.id, i, -1)} />
+                        <IconButton id={`step-down-${s.id}`} icon="arrowDown" label={`${i + 1}단계를 아래로`} aria-disabled={i === timeline.length - 1} onClick={() => i < timeline.length - 1 && moveStep(s.id, i, 1)} />
+                        <IconButton icon="plus" label={`${i + 1}단계 아래에 단계 넣기`} onClick={() => insertStepAfter(i)} />
                         <IconButton icon="trash" label={`${i + 1}단계 삭제`} onClick={() => removeStep(s.id, i)} />
                       </div>
                     </div>
+                    <StepReagents
+                      stepId={s.id}
+                      stepNumber={i + 1}
+                      reagents={reagents}
+                      selected={s.reagentIds ?? []}
+                      onToggle={(rid) => toggleStepReagent(s.id, rid)}
+                    />
                     <label className="mt-2 hidden min-h-9 cursor-pointer items-center gap-2 px-1 text-sm text-ink md:flex">
                       <input type="checkbox" checked={s.isWaiting} onChange={(e) => updateStep(s.id, "isWaiting", e.target.checked)} className="h-4 w-4 accent-brand" />
                       대기 단계 <span className="text-ink-muted">(지켜보지 않아도 되는 시간)</span>

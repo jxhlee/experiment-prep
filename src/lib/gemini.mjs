@@ -1,7 +1,7 @@
 // 서버 라우트(서비스 API)와 브라우저(사용자 본인 키)가 함께 쓰는 Gemini 추출 공통 모듈.
 
 // 프롬프트나 스키마를 바꾸면 올린다. 저장된 분석 결과 캐시가 이 값으로 구분되어 자동으로 무효화된다.
-export const EXTRACT_VERSION = "3";
+export const EXTRACT_VERSION = "5";
 
 // 서비스 API는 하루 호출 한도가 작아서 입력 길이를 제한한다. 사용자 본인 키는 안전 상한만 둔다.
 export const MAX_CHARS_SERVER = 6000;
@@ -30,15 +30,20 @@ export const RESPONSE_SCHEMA = {
     },
     steps: {
       type: "ARRAY",
-      description: "실행 순서와 각 단계의 소요/대기 시간",
+      description: "글에 나온 순서대로 빠짐없이 나열한 실험 조작(시간이 없는 조작 포함)",
       items: {
         type: "OBJECT",
         properties: {
-          label: { type: "STRING", description: "짧은 한국어 단계 이름 (예: 원심분리, 얼음 위 배양)" },
-          duration: { type: "STRING", description: "한 번 수행하는 시간을 '숫자 단위'로 (예: 30 min, 1 h, overnight). 없으면 빈 문자열" },
+          label: { type: "STRING", description: "짧은 한국어 단계 이름 (예: 시약 첨가, 교반, 여과, 원심분리)" },
+          duration: { type: "STRING", description: "한 번 수행하는 시간을 '숫자 단위'로 (예: 30 min, 1 h, overnight). 글에 시간이 없으면 빈 문자열" },
           repeat: { type: "INTEGER", description: "반복 횟수. 반복이 없으면 1" },
-          details: { type: "STRING", description: "온도·속도(rpm, g)·pH 등 조건. 없으면 빈 문자열" },
-          isWaiting: { type: "BOOLEAN", description: "사용자가 손을 쓰지 않고 기다리는 단계(배양, 반응, 냉각, 방치, 원심분리 등)면 true" },
+          details: { type: "STRING", description: "한국어로 짧게. 온도·속도(rpm, g)·pH·분위기, 무엇을 어디에 어떻게 하는지. 숫자·단위·시약 이름은 원문 그대로. 없으면 빈 문자열" },
+          isWaiting: { type: "BOOLEAN", description: "사람이 손을 쓰지 않고 기다려도 되는 시간(반응 진행, 배양, 냉각, 건조, 방치, 전기영동 등)이면 true. 사람이 직접 하는 조작이면 false" },
+          reagentRefs: {
+            type: "ARRAY",
+            description: "이 단계에서 쓰는 시약의 번호 목록. 위 reagents 배열에서 0부터 세는 순번. 쓰는 시약이 없으면 빈 배열",
+            items: { type: "INTEGER" },
+          },
         },
         required: ["label"],
       },
@@ -51,16 +56,22 @@ const PROMPT_PREFIX = `너는 실험 논문의 Methods 섹션을 읽고 실험 �
 계산은 하지 말고, 텍스트에 적힌 값을 옮겨 적기만 하라. 텍스트에 없는 값은 빈 문자열로 두고 절대 지어내지 마라.
 
 [시약 reagents]
+- 실험에서 쓰는 모든 물질을 넣는다: 시약, 용매, 완충액·배지·키트 성분, 효소·항체·프라이머, 마스터 믹스, 지시약 등. 양이나 농도가 적혀 있지 않아도 이름만으로 넣는다. (예: PBS, 2x Taq master mix, 4x Laemmli sample buffer, ethidium bromide) 실험 기구·장비(원심분리기, 플라스크, 컬럼)와 합성해서 얻는 생성물은 넣지 않는다.
 - 용액(버퍼 등)을 이루는 성분마다 한 줄씩 만든다. 같은 시약이 여러 용액에 쓰이면 용액마다 따로 한 줄씩 만든다.
 - name: 화학물질 이름만 영문으로 적는다. 'buffer', 'solution' 같은 말은 빼고, pH는 필요하면 괄호로 덧붙인다. (예: 'Tris-HCl (pH 7.5)')
-- concentration: 목표 농도를 '숫자 단위' 형식으로 적는다. (예: '50 mM', '2 mg/mL', '0.9 % (w/v)', '1 % (v/v)') 텍스트에 w/v, v/v가 적혀 있지 않으면 '1 %'처럼 %만 적는다.
-- amount: 텍스트에 그 시약 자체의 양이 적혀 있을 때만 '숫자 단위'로 적는다. (예: '1.213 g', '0.2 mg', '10 mL', '20 units') 질량과 mmol이 함께 적혀 있으면 질량을 쓴다. 농도로 만드는 용액의 부피는 여기에 넣지 않는다.
+- concentration: 목표 농도를 '숫자 단위' 형식으로 적는다. (예: '50 mM', '2 mg/mL', '0.9 % (w/v)', '1 % (v/v)', '2x') 텍스트에 w/v, v/v가 적혀 있지 않으면 '1 %'처럼 %만 적는다.
+- amount: 텍스트에 그 시약 자체의 양이 적혀 있을 때만 '숫자 단위'로 적는다. (예: '1.213 g', '0.2 mg', '10 mL', '12.5 µL', '5 drops') 질량과 mmol이 함께 적혀 있으면 질량을 쓴다. 농도로 만드는 용액의 부피는 여기에 넣지 않는다.
+- '12.5 µL of 2x master mix', '1 µL of primer (10 µM)'처럼 원액을 정해진 부피만큼 넣는다고 적힌 시약은 concentration을 비우고 amount에 넣는 부피('12.5 µL', '1 µL')만 적는다. 원액 농도는 name 뒤에 괄호로 덧붙인다. (예: 'Taq master mix (2x stock)', 'forward primer (10 µM stock)') 이런 시약에는 solutionVolume도 적지 않는다.
 - solutionVolume: concentration을 적은 시약이 들어 있는 용액의 최종 부피를 '숫자 단위'로 적는다. (예: '100 mL') 용액의 최종 부피가 적혀 있으면 그 용액의 모든 농도 성분 줄에 같은 값을 넣는다. concentration이 없는 시약은 비워 둔다.
 
 [실행 단계 steps]
-- 실험 조작을 순서대로 나열한다. 용액 제조는 소요 시간이 적혀 있을 때만 단계로 넣는다.
-- label은 반드시 한국어 명사형으로 적는다. (예: '소성', '질화', '교반', '수열 반응', '광조사', '여과', '건조', '원심분리') 영어 동사를 그대로 쓰지 않는다.
-- 'washed 3 times for 10 min each'는 duration '10 min', repeat 3으로 적는다.
+- 실험 조작을 글에 나온 순서대로 빠짐없이 나열한다. 시약 넣기·녹이기·섞기·pH 맞추기·여과·세척·재결정·로딩·측정처럼 시간이 적혀 있지 않은 조작도 각각 한 단계로 넣고 duration은 빈 문자열로 둔다. 시간이 없다고 건너뛰지 마라.
+- label은 반드시 한국어 명사형으로 적는다. (예: '시약 첨가', '교반', '수열 반응', '광조사', '여과', '건조', '원심분리') 같은 말이 반복되면 무엇에 대한 것인지 드러나게 구분한다. (예: '얼음 냉각', '실온 냉각') 영어 동사를 그대로 쓰지 않는다.
+- details는 한국어로 짧게 적는다. 온도·속도·pH·분위기와, 무엇을 어디에 어떻게 하는지를 쓰되 숫자·단위·시약 이름은 원문 그대로 둔다. (예: '2 M NaOH 20 mL에 적하', '473 K', '14,000 x g, 4 °C')
+- reagentRefs에는 그 단계에서 쓰는 시약을 위 reagents 배열의 순번(0부터)으로 적는다. 시약을 넣거나 쓰는 단계는 반드시 연결한다. 시약을 쓰지 않는 단계는 빈 배열이다.
+- isWaiting은 사람이 손을 쓰지 않고 기다려도 되는 시간(반응 진행, 배양, 냉각, 건조, 방치, 전기영동, 원심분리 등)일 때만 true이다. 넣기·섞기·세척·여과·피펫팅·적정·로딩·측정처럼 사람이 직접 하는 조작은 false이다.
+- 여러 조작이 한 묶음으로 N번 반복되면(예: 'denaturation, annealing, extension, 30 cycles') 단계 하나로 묶는다. duration은 묶음을 한 번 하는 데 드는 시간의 합, repeat은 N, details에 묶음의 구성을 적는다. (예: '95 °C 30 s → 58 °C 30 s → 72 °C 1 min')
+- 'washed 3 times for 10 min each'는 duration '10 min', repeat 3으로 적는다. duration × repeat는 그 단계의 전체 시간과 같아야 한다. (예: 30 s on/30 s off를 10번 해서 10분이면 duration '1 min', repeat 10)
 
 Methods 텍스트:
 """
@@ -132,6 +143,17 @@ export function failureMessage(kind, waitSec) {
 
 const text$ = (v) => (typeof v === "string" ? v.trim() : "");
 
+/** 시약 순번 목록 → 정수만, 범위 안(0 ≤ n < 시약 수)만, 중복 없이 */
+function cleanRefs(refs, count) {
+  if (!Array.isArray(refs)) return [];
+  const out = [];
+  for (const v of refs) {
+    const n = typeof v === "number" ? v : Number(v);
+    if (Number.isInteger(n) && n >= 0 && n < count && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
 /** Gemini 응답 → { reagents, steps }. 해석할 수 없으면 bad-response 오류 */
 export function parseExtraction(data) {
   const parts = data?.candidates?.[0]?.content?.parts;
@@ -159,6 +181,7 @@ export function parseExtraction(data) {
       repeat: Math.max(1, Math.floor(Number(s?.repeat)) || 1),
       details: text$(s?.details),
       isWaiting: Boolean(s?.isWaiting),
+      reagentRefs: cleanRefs(s?.reagentRefs, Array.isArray(parsed?.reagents) ? parsed.reagents.length : 0),
     })),
   };
 }

@@ -8,6 +8,7 @@ import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
 import { Alert, Button, Card, Disclosure, Field, PageHeader, Segmented, inputClass } from "../ui";
 import { focusSoon } from "./focus";
+import { usePdfImport } from "./PdfImport";
 import Stepper from "./Stepper";
 
 // 서비스 API가 한도·혼잡으로 막혔을 때 "내 API 키"로 바꿔 보라고 안내할 오류 종류
@@ -27,6 +28,7 @@ export default function StepInput() {
   const limit = apiMode === "own" ? MAX_CHARS_OWN_KEY : MAX_CHARS_SERVER;
   const length = methodText.trim().length;
   const overLimit = length > limit;
+  const pdf = usePdfImport({ limit, ownKey: apiMode === "own", methodText, setMethodText, notify });
 
   async function onAnalyze() {
     if (isAnalyzing) return;
@@ -39,7 +41,7 @@ export default function StepInput() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="새 실험"
-        description="논문의 Methods를 붙여넣으면 시약과 실행 단계를 정리해요."
+        description="논문의 Methods를 붙여넣거나 PDF에서 가져오면 시약과 실행 단계를 정리해요."
         actions={
           hasWork && (
             <Button
@@ -60,8 +62,12 @@ export default function StepInput() {
       <Stepper step={1} />
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_19rem]">
-        <div>
-          <Field id="method-text" label="논문 Methods" hint="시약과 실험 순서가 나오는 문단만 붙여넣으면 더 정확해요.">
+        <div {...pdf.dropProps} className={`rounded-xl ${pdf.dragging ? "outline-2 outline-dashed outline-offset-4 outline-accent" : ""}`}>
+          <Field
+            id="method-text"
+            label="논문 Methods"
+            hint="시약과 실험 순서가 나오는 문단만 붙여넣으면 더 정확해요. PDF 파일을 여기로 끌어다 놓거나 「PDF에서 가져오기」를 눌러도 돼요 (파일은 서버로 보내지 않아요)."
+          >
             <textarea
               rows={16}
               value={methodText}
@@ -70,14 +76,23 @@ export default function StepInput() {
             />
           </Field>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <Button variant="ghost" size="sm" onClick={() => setMethodText(SAMPLE_METHODS)}>
-              <Icon name="sparkles" size={16} />
-              예시 문단 넣어 보기
-            </Button>
+            <div className="flex flex-wrap items-center gap-1">
+              {pdf.fileInput}
+              <Button variant="secondary" size="sm" aria-disabled={pdf.busy} onClick={pdf.openPicker}>
+                <Icon name="upload" size={16} />
+                PDF에서 가져오기
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setMethodText(SAMPLE_METHODS)}>
+                <Icon name="sparkles" size={16} />
+                예시 문단
+              </Button>
+            </div>
             <p className={`text-sm ${overLimit ? "font-semibold text-danger" : "text-ink-muted"}`}>
               {fmt(length)} / {fmt(limit)}자{overLimit && " — 한도를 넘었어요"}
             </p>
           </div>
+
+          {pdf.panel}
         </div>
 
         <Card className="flex flex-col gap-6 self-start">

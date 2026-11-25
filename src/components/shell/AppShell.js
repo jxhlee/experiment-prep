@@ -31,11 +31,11 @@ function LiveRegion() {
 export default function AppShell({ children }) {
   return (
     <ExperimentProvider>
-      <div className="min-h-screen lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="min-h-screen lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] print:block">
         <Sidebar />
         <div className="flex min-w-0 flex-col">
           <Topbar />
-          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 pb-28 focus:outline-none sm:px-6 lg:px-8 lg:pb-12">
+          <main id="main" tabIndex={-1} className="mx-auto w-full max-w-4xl flex-1 px-4 py-8 pb-28 focus:outline-none sm:px-6 lg:px-8 lg:pb-12 print:max-w-none print:p-0">
             {children}
           </main>
         </div>

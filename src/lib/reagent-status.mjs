@@ -46,3 +46,16 @@ export function summarizeExistence(names, infoByKey, keyOf) {
   }
   return out;
 }
+
+/** PubChem 유해성(GHS) 확인 결과가 비어 있거나 실패했을 때 사람이 읽을 안내. 보여 줄 말이 없으면 빈 문자열 */
+export function ghsNote(info) {
+  const g = info?.ghs;
+  if (info?.ghsState === "error") return "유해성 정보를 가져오지 못했어요.";
+  if (info?.state === "checking" || !info || info.ghsState == null) return "";
+  if (!g) return "PubChem에 GHS 정보가 없어요.";
+  if (g.hazards.length === 0 && g.notHazardousShare != null && g.notHazardousShare >= 0.5) {
+    return `신고의 ${Math.round(g.notHazardousShare * 100)}%가 GHS 위험 물질이 아니라고 보고했어요.`;
+  }
+  if (g.hazards.length === 0) return "합의된 유해 분류가 없어요.";
+  return "";
+}

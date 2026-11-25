@@ -45,7 +45,7 @@ export function BrandLink({ className = "" }) {
 export function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="hidden border-r border-line bg-surface lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:self-start">
+    <aside className="hidden border-r border-line bg-surface lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:self-start print:hidden">
       <div className="flex h-14 items-center px-4">
         <BrandLink />
       </div>
@@ -90,7 +90,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="하단 메뉴"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden print:hidden"
     >
       <ul className="grid grid-cols-6">
         {items.map((item) => {

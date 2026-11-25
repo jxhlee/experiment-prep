@@ -25,7 +25,7 @@ function tokens(body) {
   return out;
 }
 
-const light = tokens(block(css, /^:root\s*\{/m));
+const light = tokens(block(css, /^:root,\s*\.paper\s*\{/m));
 const dark = { ...light, ...tokens(block(block(css, /@media \(prefers-color-scheme: dark\)/), /:root\s*\{/)) };
 
 function luminance(hex) {

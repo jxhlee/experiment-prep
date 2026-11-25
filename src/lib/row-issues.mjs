@@ -5,7 +5,7 @@ import { checkInventory } from "./inventory.mjs";
 import { existenceOf } from "./reagent-status.mjs";
 
 /** 시약 한 줄의 주의 사항: 구매 요망 > 못 찾음 > 다른 형태 > AI 해석 순서 */
-export function reagentIssues({ name, analysis = null, info = undefined, inventoryIndex = null }) {
+export function reagentIssues({ name, analysis = null, info = undefined, inventoryIndex = null, userAdded = false }) {
   const out = [];
   if (!String(name ?? "").trim()) return out;
 
@@ -20,11 +20,16 @@ export function reagentIssues({ name, analysis = null, info = undefined, invento
   if (analysis?.overall === "ai") {
     out.push({ id: "ai", tone: "accent", icon: "sparkles", text: `AI 해석 · ${analysis.aiFields.join("·")}`, hint: "원문에서 그대로 찾지 못한 값이에요. 원문과 대조하세요" });
   }
+  if (userAdded) out.push({ id: "user", tone: "neutral", icon: "pencil", text: "직접 추가", hint: "내가 추가한 시약이에요" });
   return out;
 }
 
 /** 실행 단계 한 줄의 주의 사항: 시간·반복·조건이 원문에서 그대로 찾아지지 않을 때만 */
-export function stepIssues({ analysis = null }) {
-  if (analysis?.overall !== "ai") return [];
-  return [{ id: "ai", tone: "accent", icon: "sparkles", text: `AI 해석 · ${analysis.aiFields.join("·")}`, hint: "원문에서 그대로 찾지 못한 값이에요. 원문과 대조하세요" }];
+export function stepIssues({ analysis = null, userAdded = false }) {
+  const out = [];
+  if (analysis?.overall === "ai") {
+    out.push({ id: "ai", tone: "accent", icon: "sparkles", text: `AI 해석 · ${analysis.aiFields.join("·")}`, hint: "원문에서 그대로 찾지 못한 값이에요. 원문과 대조하세요" });
+  }
+  if (userAdded) out.push({ id: "user", tone: "neutral", icon: "pencil", text: "직접 추가", hint: "내가 추가한 단계예요" });
+  return out;
 }

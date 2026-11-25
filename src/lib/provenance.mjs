@@ -248,6 +248,7 @@ function summarize(fields) {
  * 원문이 없으면(직접 입력) null 을 돌려준다.
  */
 export function analyzeReagent(reagent, text) {
+  if (reagent?.userAdded) return null; // 사용자가 직접 넣은 줄은 원문과 맞춰 볼 대상이 아니다(AI 가 뽑은 값이 아니므로)
   if (!String(text ?? "").trim()) return null;
   const hasName = String(reagent?.name ?? "").trim() !== "";
   const context = reagentContext(reagent?.name, text);
@@ -263,6 +264,7 @@ export function analyzeReagent(reagent, text) {
 
 /** 실행 단계: 이름(한국어 요약)과 대기 여부는 항상 AI 가 정한 것이고, 시간·반복·조건은 원문과 맞춰 본다. */
 export function analyzeStep(step, text) {
+  if (step?.userAdded) return null;
   if (!String(text ?? "").trim()) return null;
   const fields = {
     duration: verdict(durationInText(step?.duration, text)),

@@ -55,14 +55,22 @@ export function toRecord({ title, methodText, reagents, steps, scaleFactor, sigF
     name: str(r.name),
     concentration: str(r.concentration),
     volume: str(r.volume),
+    ...(r.userAdded ? { userAdded: true } : {}),
   }));
-  const cleanSteps = steps.map((s) => ({
-    label: str(s.label),
-    duration: str(s.duration),
-    repeat: repeatOf(s.repeat),
-    details: str(s.details),
-    isWaiting: Boolean(s.isWaiting),
-  }));
+  // 단계가 쓰는 시약은 줄 id 대신 목록에서의 순번(0부터)으로 저장한다. 지워진 시약은 건너뛴다.
+  const indexOfId = new Map(reagents.map((r, i) => [r.id, i]));
+  const cleanSteps = steps.map((s) => {
+    const refs = [...new Set((Array.isArray(s.reagentIds) ? s.reagentIds : []).map((id) => indexOfId.get(id)).filter((i) => i != null))].sort((a, b) => a - b);
+    return {
+      label: str(s.label),
+      duration: str(s.duration),
+      repeat: repeatOf(s.repeat),
+      details: str(s.details),
+      isWaiting: Boolean(s.isWaiting),
+      ...(refs.length > 0 ? { reagents: refs } : {}),
+      ...(s.userAdded ? { userAdded: true } : {}),
+    };
+  });
   return {
     title: str(title).trim().slice(0, 120),
     method_text: str(methodText).slice(0, 60000),
@@ -87,6 +95,7 @@ export function fromRecord(row) {
       name: str(r?.name),
       concentration: str(r?.concentration),
       volume: str(r?.volume),
+      ...(r?.userAdded === true ? { userAdded: true } : {}),
     })),
     steps: (Array.isArray(row.steps) ? row.steps : []).map((s, i) => ({
       id: i + 1,
@@ -95,6 +104,9 @@ export function fromRecord(row) {
       repeat: repeatOf(s?.repeat),
       details: str(s?.details),
       isWaiting: Boolean(s?.isWaiting),
+      // 저장된 순번(0부터) → 시약 줄 id(순번 + 1). 범위를 벗어난 값은 버린다.
+      reagentIds: [...new Set((Array.isArray(s?.reagents) ? s.reagents : []).filter((n) => Number.isInteger(n) && n >= 0 && n < (Array.isArray(row.reagents) ? row.reagents.length : 0)).map((n) => n + 1))],
+      ...(s?.userAdded === true ? { userAdded: true } : {}),
     })),
   };
 }

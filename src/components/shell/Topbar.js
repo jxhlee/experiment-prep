@@ -13,6 +13,7 @@ const CRUMBS = {
   "/new": ["새 실험", "입력"],
   "/new/review": ["새 실험", "추출 결과 확인"],
   "/new/result": ["새 실험", "결과"],
+  "/new/result/report": ["새 실험", "결과", "PDF로 저장"],
   "/experiments": ["내 실험"],
   "/reagents": ["분자량 기록"],
   "/inventory": ["보유 시약"],
@@ -88,7 +89,7 @@ export default function Topbar() {
   const crumbs = CRUMBS[pathname] ?? [];
 
   return (
-    <header className="flex min-h-14 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6 lg:px-8">
+    <header className="flex min-h-14 items-center justify-between gap-3 border-b border-line bg-surface px-4 sm:px-6 lg:px-8 print:hidden">
       <BrandLink className="lg:hidden" />
       <nav aria-label="현재 위치" className="hidden lg:block">
         <ol className="flex items-center gap-1.5 text-sm text-ink-muted">

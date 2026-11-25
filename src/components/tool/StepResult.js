@@ -4,15 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { computeRow, formatAmount, mergeResults, namesNeedingLookup, normalizeName, scaleResult } from "../../lib/chem.mjs";
 import { analyzeReagent, analyzeStep } from "../../lib/provenance.mjs";
+import { buildDilutionPlan } from "../../lib/dilution.mjs";
 import { reagentIssues } from "../../lib/row-issues.mjs";
-import { buildNarrative, buildTimeline, formatMinutes } from "../../lib/timeline.mjs";
+import { buildProcedure } from "../../lib/procedure.mjs";
+import { buildTimeline, formatMinutes } from "../../lib/timeline.mjs";
 import { ScaleControl, SigFigsControl } from "../controls";
 import { useExperiment } from "../ExperimentProvider";
 import { Icon } from "../icons";
 import MwPicker from "../MwPicker";
 import SaveControl from "../SaveControl";
 import { Card, Disclosure, EmptyState, IssueList, PageHeader, Segmented, TabPanel, Tabs, buttonClass } from "../ui";
+import DilutionPanel from "./DilutionPanel";
 import DisposalPanel from "./DisposalPanel";
+import ProcedurePanel from "./ProcedurePanel";
 import { EvidenceQuote } from "./Provenance";
 import { focusSoon } from "./focus";
 import Stepper from "./Stepper";
@@ -57,13 +61,18 @@ export default function StepResult() {
     () => reagents.map((r) => ({ id: r.id, name: r.name, res: computeRow(r, { mwMap }) })),
     [reagents, mwMap],
   );
+  const dilution = useMemo(() => buildDilutionPlan({ reagents, mwMap, scaleFactor, sigFigs }), [reagents, mwMap, scaleFactor, sigFigs]);
   const tl = useMemo(() => buildTimeline(timeline), [timeline]);
-  const narrative = useMemo(() => buildNarrative(tl), [tl]);
+  const procedure = useMemo(() => buildProcedure({ reagents, steps: timeline, mwMap, scaleFactor, sigFigs }), [reagents, timeline, mwMap, scaleFactor, sigFigs]);
 
   const rows = baseResults.map((r) => (r.res.ok ? { ...r, res: scaleResult(r.res, scaleFactor) } : r));
   const mergedRows = mergeResults(baseResults).map((m) => scaleResult(m, scaleFactor));
   const skipped = baseResults.filter((r) => !r.res.ok);
   const scaleText = scaleFactor === 1 ? "" : ` × ${scaleFactor}배`;
+  const hasDilution = dilution.groups.length > 0;
+  const dilutionNames = dilution.groups.map((g) => g.name).join(", ");
+  // 희석 계획이 없어졌는데 그 탭을 보고 있었다면 계량표로 돌아간다
+  const activeTab = tab === "dilution" && !hasDilution ? "table" : tab;
 
   // 분자량을 적용하면 이 줄의 모양이 바뀌어 누르던 버튼이 사라지므로, 같은 줄의 이름 칸으로 포커스를 옮긴다
   const applyMw = (row, mw, form = "") => {
@@ -97,7 +106,19 @@ export default function StepResult() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="계산 결과" description={summary} actions={<SaveControl />} />
+      <PageHeader
+        title="계산 결과"
+        description={summary}
+        actions={
+          <>
+            <Link href="/new/result/report" className={buttonClass({ variant: "secondary", size: "sm" })}>
+              <Icon name="download" size={16} />
+              PDF로 저장
+            </Link>
+            <SaveControl />
+          </>
+        }
+      />
       <Stepper step={3} />
 
       <Card flush>
@@ -105,16 +126,17 @@ export default function StepResult() {
           <Tabs
             label="결과 보기"
             idPrefix="result"
-            value={tab}
+            value={activeTab}
             onChange={setTab}
             tabs={[
               { id: "table", label: "계량 준비표", count: reagents.length },
-              { id: "timeline", label: "타임라인", count: tl.items.length },
+              ...(hasDilution ? [{ id: "dilution", label: "희석 계획", count: dilution.groups.length }] : []),
+              { id: "timeline", label: "실험 과정", count: tl.items.length },
               { id: "disposal", label: "폐기·안전" },
             ]}
           />
 
-          <TabPanel idPrefix="result" id="table" value={tab} className="pt-5">
+          <TabPanel idPrefix="result" id="table" value={activeTab} className="pt-5">
             <div className="flex flex-wrap items-start gap-x-10 gap-y-4">
               <div className="w-full sm:w-64">
                 <ScaleControl id="scale-result" value={scaleFactor} onChange={setScaleFactor} />
@@ -133,6 +155,23 @@ export default function StepResult() {
                 ]}
               />
             </div>
+
+            {hasDilution && !loading && (
+              <p className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-muted">
+                <Icon name="beaker" size={16} />
+                <span>{dilutionNames}은(는) 농도가 여러 가지예요. 원액을 한 번에 만들어 나눠 희석하면 간편해요.</span>
+                <button
+                  type="button"
+                  className={buttonClass({ variant: "link", size: "sm" })}
+                  onClick={() => {
+                    setTab("dilution");
+                    focusSoon("result-tab-dilution");
+                  }}
+                >
+                  희석 계획 보기
+                </button>
+              </p>
+            )}
 
             {loading ? (
               <p role="status" className="mt-5 py-8 text-center text-sm text-ink-muted">
@@ -173,7 +212,7 @@ export default function StepResult() {
                       ))
                     : rows.map((r, idx) => {
                         const a = rowAnalysis[idx];
-                        const issues = reagentIssues({ name: r.name, analysis: a, info: reagentInfo[normalizeName(r.name).key], inventoryIndex });
+                        const issues = reagentIssues({ name: r.name, analysis: a, info: reagentInfo[normalizeName(r.name).key], inventoryIndex, userAdded: reagents[idx]?.userAdded });
                         const needsDetail = r.res.ok && (r.res.notes.length > 0 || a?.overall === "ai");
                         return (
                           <tr key={r.id} className="align-top">
@@ -234,28 +273,17 @@ export default function StepResult() {
             )}
           </TabPanel>
 
-          <TabPanel idPrefix="result" id="timeline" value={tab} className="flex flex-col gap-8 pt-5">
-            <Timeline tl={tl} prov={stepProv} />
-            <section aria-labelledby="narrative-heading">
-              <h2 id="narrative-heading" className="text-[15px] font-semibold text-ink">
-                진행 설명
-              </h2>
-              {narrative.length === 0 ? (
-                <p className="mt-2 text-sm text-ink-muted">설명할 단계가 없어요. 이전 단계에서 실행 단계를 추가해 주세요.</p>
-              ) : (
-                <ol className="mt-2 flex flex-col gap-2 text-sm leading-relaxed text-ink">
-                  {narrative.map((line, i) => (
-                    <li key={i} className={i === narrative.length - 1 ? "font-semibold" : "text-ink-muted"}>
-                      {line}
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </section>
+          <TabPanel idPrefix="result" id="dilution" value={activeTab} className="pt-5">
+            {hasDilution && <DilutionPanel groups={dilution.groups} />}
           </TabPanel>
 
-          <TabPanel idPrefix="result" id="disposal" value={tab} className="pt-5">
-            {tab === "disposal" && <DisposalPanel />}
+          <TabPanel idPrefix="result" id="timeline" value={activeTab} className="flex flex-col gap-8 pt-5">
+            <Timeline tl={tl} prov={stepProv} />
+            <ProcedurePanel procedure={procedure} scaleFactor={scaleFactor} />
+          </TabPanel>
+
+          <TabPanel idPrefix="result" id="disposal" value={activeTab} className="pt-5">
+            {activeTab === "disposal" && <DisposalPanel />}
           </TabPanel>
         </div>
       </Card>

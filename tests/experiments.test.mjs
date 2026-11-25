@@ -73,3 +73,34 @@ test("불러오기: 비어 있거나 이상한 값이 와도 깨지지 않는다
 test("기본 이름은 날짜가 들어간다", () => {
   assert.equal(defaultTitle(new Date("2026-10-30T09:00:00Z")), "새 실험 2026-10-30");
 });
+
+test("저장·불러오기: 단계가 쓰는 시약과 '직접 추가' 표시가 순번으로 저장되고 새 id 로 복원된다", () => {
+  const rs = [
+    { id: 7, name: "NaCl", concentration: "150 mM", volume: "100 mL" },
+    { id: 9, name: "Ethanol", concentration: "", volume: "10 mL", userAdded: true },
+    { id: 12, name: "HCl", concentration: "1 M", volume: "" },
+  ];
+  const ss = [
+    { id: 3, label: "혼합", duration: "", repeat: 1, details: "", isWaiting: false, reagentIds: [12, 7, 7, 999] }, // 999 는 지워진 시약
+    { id: 4, label: "추가한 단계", duration: "5 min", repeat: 1, details: "", isWaiting: false, reagentIds: [9], userAdded: true },
+    { id: 5, label: "건조", duration: "1 h", repeat: 1, details: "", isWaiting: true },
+  ];
+  const record = toRecord({ ...base, reagents: rs, steps: ss });
+  assert.deepEqual(record.steps[0].reagents, [0, 2], "id 가 아니라 목록 순번으로, 지워진 시약은 빼고");
+  assert.deepEqual(record.steps[1].reagents, [1]);
+  assert.equal(record.steps[1].userAdded, true);
+  assert.equal(Object.hasOwn(record.steps[2], "reagents"), false, "연결이 없으면 키를 만들지 않는다");
+  assert.equal(record.reagents[1].userAdded, true);
+  assert.equal(Object.hasOwn(record.reagents[0], "userAdded"), false);
+
+  const loaded = fromRecord({ id: "z", ...record });
+  assert.deepEqual(loaded.steps.map((s) => s.reagentIds), [[1, 3], [2], []]);
+  assert.equal(loaded.steps[1].userAdded, true);
+  assert.equal(loaded.reagents[1].userAdded, true);
+});
+
+test("불러오기: 범위를 벗어났거나 이상한 시약 번호는 버린다", () => {
+  const loaded = fromRecord({ id: "q", reagents: [{ name: "A" }, { name: "B" }], steps: [{ label: "x", reagents: [0, 5, -1, 1.5, "1", null, 1, 1] }, { label: "y", reagents: "0" }] });
+  assert.deepEqual(loaded.steps[0].reagentIds, [1, 2]);
+  assert.deepEqual(loaded.steps[1].reagentIds, []);
+});

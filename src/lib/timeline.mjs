@@ -85,20 +85,30 @@ export function buildTimeline(steps) {
   return { items, totalMin: t, unknownCount };
 }
 
+/** 단계 하나의 소요 시간 문구: "약 1시간 (30분 × 2회)" */
+export function describeDuration(item) {
+  if (item.totalMin == null) return "시간 미정";
+  const rep = item.repeat > 1 ? ` (${formatMinutes(item.perMin)} × ${item.repeat}회)` : "";
+  return `${item.approx ? "약 " : ""}${formatMinutes(item.totalMin)}${rep}`;
+}
+
 /** 시간이 미정인 단계가 앞에 있으면 시작 시각은 "그 이후"로만 말할 수 있다 */
 export function formatStart(item) {
   return `시작 +${formatMinutes(item.startMin)}${item.unknownBefore > 0 ? " 이후" : ""}`;
 }
 
+/** 줄글에 쓰는 시작 시점: "실험 시작과 함께", "시작 후 30분이 지난 시점에" */
+export function startPhrase(it) {
+  if (it.unknownBefore > 0) {
+    return it.startMin === 0 ? "앞 단계가 끝나는 대로" : `시작 후 최소 ${formatMinutes(it.startMin)}이 지난 시점에`;
+  }
+  return it.startMin === 0 ? "실험 시작과 함께" : `시작 후 ${formatMinutes(it.startMin)}이 지난 시점에`;
+}
+
 /** 단계별 줄글 설명 + 전체 요약 */
 export function buildNarrative({ items, totalMin, unknownCount }) {
   const lines = items.map((it, i) => {
-    let start;
-    if (it.unknownBefore > 0) {
-      start = it.startMin === 0 ? "앞 단계가 끝나는 대로" : `시작 후 최소 ${formatMinutes(it.startMin)}이 지난 시점에`;
-    } else {
-      start = it.startMin === 0 ? "실험 시작과 함께" : `시작 후 ${formatMinutes(it.startMin)}이 지난 시점에`;
-    }
+    const start = startPhrase(it);
     let dur;
     if (it.totalMin == null) dur = "소요 시간이 명시되지 않았습니다(전체 시간 계산에서 제외)";
     else {

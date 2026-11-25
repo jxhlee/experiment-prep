@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { clearDraft, loadDraft, saveDraft, sessionStore } from "../lib/draft.mjs";
 import { findEntry, isMixtureName, namesNeedingLookup, normalizeName } from "../lib/chem.mjs";
 import { getSupabase } from "../lib/supabase";
@@ -86,8 +86,9 @@ export function ExperimentProvider({ children }) {
   const infoRef = useRef({});
   const probeRef = useRef({});
 
-  // 동작들이 항상 최신 값을 읽도록 매 렌더 뒤에 갱신한다 (동작 함수는 모양이 바뀌지 않게 둔다)
-  useEffect(() => {
+  // 동작들이 항상 최신 값을 읽도록 매 렌더 뒤에 갱신한다 (동작 함수는 모양이 바뀌지 않게 둔다).
+  // 자식 화면의 useEffect 가 이 값을 읽기 전에 갱신돼야 하므로(주소로 바로 들어와 임시 저장본이 채워지는 순간 등) 레이아웃 효과로 둔다.
+  useLayoutEffect(() => {
     latest.current = { methodText, scaleFactor, sigFigs, reagents, timeline, mwMap, apiMode, apiKey, saveTitle, currentId, user: auth.user, userId, inventory };
   });
 
@@ -227,6 +228,10 @@ export function ExperimentProvider({ children }) {
         repeat: s.repeat || 1,
         details: s.details || "",
         isWaiting: Boolean(s.isWaiting),
+        // AI 가 가리킨 시약 순번(0부터) → 시약 줄 id(순번 + 1). 범위를 벗어난 번호는 버린다.
+        reagentIds: (Array.isArray(s.reagentRefs) ? s.reagentRefs : [])
+          .filter((n) => Number.isInteger(n) && n >= 0 && n < extractedReagents.length)
+          .map((n) => n + 1),
       }));
       stepIdRef.current = extractedSteps.length;
       setTimeline(extractedSteps);

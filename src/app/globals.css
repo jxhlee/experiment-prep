@@ -6,7 +6,9 @@
  * 색 조합은 WCAG 2.2 AA(글자 4.5:1, 입력칸 테두리·포커스 3:1)를 넘도록 정했고,
  * tests/contrast.test.mjs 가 이 파일의 값을 읽어서 조합마다 대비비를 검사한다. 색을 바꿀 때는 그 테스트를 먼저 돌려 보자.
  */
-:root {
+/* .paper(PDF로 저장할 문서)는 화면이 어두워도 흰 종이 그대로 보이도록 항상 밝은 토큰을 쓴다 */
+:root,
+.paper {
   color-scheme: light;
   --bg: #fafafa;
   --surface: #ffffff;
@@ -185,5 +187,21 @@ input[type="range"]::-moz-range-thumb {
 @media (forced-colors: active) {
   :focus-visible {
     outline-color: Highlight;
+  }
+}
+
+/* 인쇄·PDF 저장: 종이는 A4, 바탕은 흰색으로. 화면 장식(메뉴·상단바·버튼)은 각 요소의 print:hidden 이 숨긴다. */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+  }
+  .paper {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

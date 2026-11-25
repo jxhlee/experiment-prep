@@ -2,18 +2,12 @@
 
 import { useState } from "react";
 import { stepIssues } from "../../lib/row-issues.mjs";
-import { formatMinutes, formatStart } from "../../lib/timeline.mjs";
+import { describeDuration, formatMinutes, formatStart } from "../../lib/timeline.mjs";
 import { Icon } from "../icons";
 import { Alert, Button, IssueList, Segmented } from "../ui";
 
-function describeDuration(item) {
-  if (item.totalMin == null) return "시간 미정";
-  const rep = item.repeat > 1 ? ` (${formatMinutes(item.perMin)} × ${item.repeat}회)` : "";
-  return `${item.approx ? "약 " : ""}${formatMinutes(item.totalMin)}${rep}`;
-}
-
 function StepCard({ step, index, large = false, prov = null }) {
-  const issues = stepIssues({ analysis: prov });
+  const issues = stepIssues({ analysis: prov, userAdded: step.userAdded });
   return (
     <div className={`flex h-full flex-col gap-1 rounded-xl border border-line bg-surface p-4 ${large ? "items-center text-center" : ""}`}>
       <span aria-hidden="true" className="flex h-6 w-6 items-center justify-center rounded-full bg-brand text-sm font-semibold text-brand-ink">
@@ -111,8 +105,8 @@ export default function Timeline({ tl, prov = {} }) {
         </div>
       )}
       {tl.items.some((s) => s.totalMin == null) && (
-        <Alert kind="warn" className="mt-4">
-          시간이 비어 있는 단계가 있어요. 이전 단계에서 시간을 적으면 총 소요 시간에 포함돼요.
+        <Alert kind="info" className="mt-4">
+          시간이 적혀 있지 않은 단계는 총 소요 시간에서 빠졌어요. 실제로는 이보다 더 걸려요. 이전 단계에서 시간을 적으면 포함돼요.
         </Alert>
       )}
     </section>

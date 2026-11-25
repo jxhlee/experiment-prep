@@ -156,6 +156,8 @@ const CURATED = new Map(
 const NAME_RULES = [
   { re: /azide/, apply: () => S("azide", ["azide", "toxic"], [T.azide]) },
   { re: /cyanide|cyanoferrate|ferricyanide|ferrocyanide/, apply: () => S("cyanide", ["cyanide"], [T.cyanide]) },
+  // 화학식으로만 적은 시안화 금속염: NaCN, KCN, CuCN, Zn(CN)2 …
+  { re: /^\s*(?:na|k|li|cu|zn|ag|ca|hg|cd|ni|au)\s*\(?\s*cn\s*\)?\s*\d*\s*$/, apply: () => S("cyanide", ["cyanide", "toxic"], [T.cyanide]) },
   { re: /dichromate|chromate|chromium\s*\(?vi\)?|chromic acid|chromium trioxide/, apply: () => S("cr6", ["cr6", "oxidizer", "cmr"], [T.cr6]) },
   { re: /hydrochloric|sulfuric|sulphuric|nitric|phosphoric|hydrobromic|perchloric|hydroiodic/, apply: (c) => S("acid", ["acid", ...(/nitric|perchloric/.test(c.lower) ? ["oxidizer", "nitric"] : [])], [T.acidCommon, ...(/nitric/.test(c.lower) ? [T.nitric] : [])]) },
   { re: /hydrofluoric/, apply: () => S("acid", ["acid", "toxic"], [T.acidCommon, "불산은 뼈까지 침투하는 맹독성이에요. 유리 용기를 쓰지 말고 지도 교원·안전 담당자와 상의하세요."]) },
@@ -186,6 +188,11 @@ function inferFromElements(c) {
   const el = c.elements;
   if (!el) return null;
   const metals = Object.keys(el).filter((e) => METALS.has(e));
+  // 시안화 금속염은 화학식에서 C 와 N 이 같은 수이고 H·O·S 가 없고 양이온 원소가 따로 있다(NaCN → CNNa).
+  // 나트륨·칼륨은 금속 목록에 없으므로 원소 개수로 본다. 금속 폐액·일반 수용액으로 잘못 분류하지 않는다.
+  if (el.C > 0 && el.C === el.N && !el.H && !el.O && !el.S && Object.keys(el).length >= 3) {
+    return S("cyanide", ["cyanide", "toxic"], [T.cyanide], { detail: "시안화 금속염" });
+  }
   if (metals.length > 0) return S("metal", ["metal"], [T.metal], { detail: `금속(${metals.join("·")}) 포함` });
   const organic = (el.C ?? 0) > 0 && (el.H ?? 0) > 0;
   const halogen = HALOGENS.some((h) => (el[h] ?? 0) > 0);
@@ -322,3 +329,22 @@ export function groupByStream(items) {
 }
 
 export const reagentKey = (name) => normalizeName(name).key;
+
+/**
+ * 한 번의 실험에 쓰는 시약마다 폐기 분류를 붙인다. 이름이 같은 시약은 한 번만 세고, 폐액 종류 순서로 정렬한다.
+ * reagentInfo 는 PubChem 확인 결과(키: 시약 이름 키)로, 있으면 화학식과 GHS 정보를 분류에 쓴다.
+ */
+export function disposalItems(reagents, reagentInfo = {}) {
+  const order = Object.keys(STREAMS);
+  const seen = new Set();
+  const out = [];
+  for (const r of reagents) {
+    const name = String(r.name ?? "").trim();
+    const key = normalizeName(name).key;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const info = reagentInfo[key];
+    out.push({ key, name, info, ...classifyReagent({ name, formula: info?.formula, ghs: info?.ghs }) });
+  }
+  return out.sort((a, b) => order.indexOf(a.stream) - order.indexOf(b.stream));
+}

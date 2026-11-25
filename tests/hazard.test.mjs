@@ -176,3 +176,19 @@ test("신호어는 위험 문구 코드에서 정한다 (공급자별로 섞인 
   assert.equal(mg.signal, "Warning", "PubChem 블록의 신호어가 Danger 여도 코드가 H315 뿐이면 경고");
   assert.equal(classifyReagent({ name: "NaCl", ghs: { signal: "Warning", hazards: [] } }).signal, null);
 });
+
+test("시안화 금속염은 화학식으로만 적어도(NaCN·KCN) 시안 폐액으로 분류하고 산과의 조합을 경고한다", () => {
+  const item = (name, formula) => {
+    const key = name.toLowerCase();
+    return { key, name, ...classifyReagent({ name, formula }) };
+  };
+  for (const name of ["NaCN", "KCN", "CuCN", "Zn(CN)2"]) assert.equal(classifyReagent({ name }).stream, "cyanide", name);
+  // PubChem 화학식(원소 알파벳순)만 있을 때도 금속 폐액이 아니라 시안 폐액
+  assert.equal(classifyReagent({ name: "sodium salt", formula: "CNNa" }).stream, "cyanide");
+  assert.equal(classifyReagent({ name: "x", formula: "C2N2Zn" }).stream, "cyanide");
+  // 티오시안산염·시안산염은 시안화 금속염이 아니다
+  assert.notEqual(classifyReagent({ name: "potassium thiocyanate", formula: "CKNS" }).stream, "cyanide");
+  assert.notEqual(classifyReagent({ name: "potassium cyanate", formula: "CKNO" }).stream, "cyanide");
+  const warn = findIncompatibilities([item("HCl"), item("NaCN")]);
+  assert.ok(warn.some((w) => w.level === "danger" && /HCN/.test(w.text)));
+});
