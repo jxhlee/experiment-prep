@@ -133,7 +133,7 @@ export default function ReportView() {
 
       <article aria-labelledby="page-title" className="paper rounded-xl border border-line bg-surface p-6 text-[13px] leading-relaxed text-ink sm:p-10 print:rounded-none print:border-0 print:p-0">
         <header className="border-b-2 border-ink pb-4">
-          <p className="text-xs text-ink-muted">실험 프렙 (가제)</p>
+          <p className="text-xs text-ink-muted">Experiment Prep</p>
           <h1 id="page-title" tabIndex={-1} className="mt-1 text-2xl font-semibold leading-tight text-ink focus:outline-none focus-visible:outline-2">
             {report.title}
           </h1>
@@ -433,7 +433,7 @@ export default function ReportView() {
             참고용 문서예요. AI가 논문에서 읽은 값은 틀릴 수 있으니 실험 전에 논문 원문과 꼭 대조하세요. 폐기는 학교·연구실 규정과 시약 SDS(MSDS) 13항을 따르세요.
           </p>
           <p className="mt-1">
-            한국어 MSDS: {KOSHA_MSDS_URL} · 유해성 정보 출처: PubChem(GHS) · 실험 프렙(가제)에서 {report.dateText} 만듦
+            한국어 MSDS: {KOSHA_MSDS_URL} · 유해성 정보 출처: PubChem(GHS) · Experiment Prep에서 {report.dateText} 만듦
           </p>
         </footer>
       </article>

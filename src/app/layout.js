@@ -13,10 +13,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
+  applicationName: "Experiment Prep",
   title: {
-    default: "실험 프렙 (가제) — 논문 실험 방법을 계량표로",
-    template: "%s · 실험 프렙 (가제)",
+    default: "Experiment Prep — 논문 실험 방법을 계량표로",
+    template: "%s · Experiment Prep",
   },
+  openGraph: { siteName: "Experiment Prep", title: "Experiment Prep — 논문 실험 방법을 계량표로", type: "website", locale: "ko_KR" },
   description:
     "논문의 Methods를 붙여넣으면 시약별 계량값, 실행 순서 타임라인, 총 소요 시간을 계산해 드리는 실험 준비 도구",
 };

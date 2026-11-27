@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Icon } from "../icons";
+import { BRAND_NAME, Logo } from "../Logo";
 
 const GROUPS = [
   {
@@ -30,13 +31,8 @@ const isActive = (pathname, item) => (item.exact ? pathname === item.href : path
 
 export function BrandLink({ className = "" }) {
   return (
-    <Link href="/" className={`flex items-center gap-2.5 rounded-lg text-ink no-underline ${className}`}>
-      <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-brand-ink">
-        <Icon name="flask" size={18} />
-      </span>
-      <span className="text-[15px] font-semibold">
-        실험 프렙 <span className="font-normal text-ink-muted">(가제)</span>
-      </span>
+    <Link href="/" aria-label={`${BRAND_NAME} 홈`} className={`flex items-center rounded-lg text-ink no-underline ${className}`}>
+      <Logo />
     </Link>
   );
 }
